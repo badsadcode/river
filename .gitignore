@@ -7,3 +7,6 @@ obj/
 /dist/
 Tests/**/bin/
 Tests/**/obj/
+
+# NoorForm tree packs: kept local (Tom's decision, D18). Without them the game uses placeholder trees.
+/Assets/Trees/

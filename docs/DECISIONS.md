@@ -213,3 +213,5 @@ Still to do (tier 3): rapids and a waterfall with portage, island labyrinths, re
   still the placeholders.
 - Cost: 80 vs 100 fps from the deck at 1600×900 on Tom's machine (≈ 2.5 ms a frame). `--no-trees` brings the old
   placeholders back. The windowed drift test now looks from the deck and reports fps.
+- The packs are **not in git** (Tom: keep them local; 247 MB). `/Assets/Trees/` is ignored; a clone without them gets
+  the placeholder trees. Copy the packs (NoorForm export) into `Assets/Trees` to get real trees.
