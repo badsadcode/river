@@ -1,6 +1,6 @@
 # RIVER — Design Pillars
 
-*Bad Ideas Works · v0.3 · 2026-11-23 · with notes from Noor*
+*Bad Ideas Works · v0.4 · 2026-11-23 · with notes from Noor*
 *Engine: Godot 4.7.2 · C# · Forward+*
 
 > One raft. One river. It does not end.
@@ -177,8 +177,8 @@ across it. These drive flow, sandbars, fish habitat, the map and the journal.
 - **Grows into:** a **shantyboat**-style home: cabin, stove, storage, drying racks, smoking rack, workbench,
   rain catchment, maybe a small sail or a dinghy for scouting.
 - **Physics:** buoyancy plus drag in the flow field. Weight and layout matter (overloading, listing).
-- **Control:** sweep oar (steering), poles (shallows), paddles, anchor, mooring lines. No engine (**OPEN**: a
-  late-game salvaged steam launch?).
+- **Control:** sweep oar (steering), poles (shallows), paddles, anchor, mooring lines. No engine at first;
+  late-game mechanisms and a salvaged steam engine: §14.10.
 - **Damage:** hull logs, lashings, leaks. Repairs need materials from the shore.
 - **Walking on deck while moving** is a hard requirement: the player character is simulated in the raft's frame.
 
@@ -254,9 +254,27 @@ The core progression and the souvenir of the run.
 - **Species:** sketch (observe long enough), collect, press, preserve.
 - **Map:** hand-drawn as you travel. Only what you've seen gets charted, and it can be wrong.
 - **Entries:** written automatically from events in a period voice, distorted by low composure.
-- **Collections:** artefacts, photographs (**OPEN**), notes on the people you meet.
+- **Collections:** artefacts, photographs (§9.1), notes on the people you meet.
 
 ---
+
+### 9.1 The camera
+A period **glass plate camera** (around 1890: wooden body, bellows, tripod, black cloth). One of the most
+important objects in the game.
+- **Found or bought** early-ish, not given at the start (unless the *society photographer* background).
+- **Limited plates.** Every photograph costs something, so you choose what's worth it.
+- **Long exposures.** Real period behaviour: you set up the tripod and hold still. Moving animals blur, water
+  turns silky, low light needs seconds. A sleeping animal or a still landscape is easy, a running deer nearly
+  impossible. That *is* the skill.
+- **Developing.** Exposed plates must be developed: chemicals, darkness and water. A **darkroom corner in the
+  cabin** is a raft upgrade. Undeveloped plates can be spoiled by light, heat, water or a capsize.
+- **Prints** go into the journal (and count as the best species record), can be **framed and hung on the raft**
+  (P7: the floating museum), and can be sent to the society for money and fame.
+- **Rendering:** captured from the real scene through a SubViewport, then processed by a shader into a period
+  look (albumen/sepia tone, uneven development, vignette, dust, scratches, light leaks, motion blur from the
+  exposure time). Each photo is saved as an image in the save folder.
+- **Darkness tie-in:** at *Hints*/*Open* uncanny levels, a developed plate may occasionally show something that
+  wasn't there.
 
 ## 10. Audio direction
 Mostly the river: flow, lapping, creaking timber, rope, birds, insects, rain on canvas. Music is rare and
@@ -316,11 +334,24 @@ first keepsake shelf) → first secret place → survival → journal → expedi
 6. **The player is an explorer.**
 7. **Upstream is allowed, and hard** (§6.2).
 
+8. **Companion: an animal found on the shore.** Not bought, not picked from a menu: *met*. A stray dog at a
+   burnt-out cabin, a crow with a hurt wing, a half-wild cat at a trading post, an otter pup… You befriend it
+   slowly (food, patience, not scaring it). It lives on the raft, has its own spot, its own habits, reacts to the
+   world (growls at something in the fog before you see it), and the journal writes about it. It is a huge part
+   of P7. It can be lost, and at high darkness it can die. That must hurt, and be rare.
+9. **Background: the player picks.** A handful of explorer backgrounds (e.g. disgraced naturalist, army
+   cartographer, society photographer, widow following a dead husband's map, missionary's runaway child, debt-
+   ridden gentleman) each giving a different starting raft/kit, a few starting skills, and a different **journal
+   voice**. Plus a custom option. Backgrounds never lock out content.
+10. **Mechanisms later in the game.** Muscle and current at first; later, salvaged and built machinery: a hand
+    winch for tracking upstream, a bilge pump, a paddle-wheel water mill to drive tools while moored, and
+    eventually a **salvaged steam engine** (from a wreck) to fit to the raft or a launch. Late, rare, needs fuel,
+    maintenance and spare parts, and makes upstream travel realistic rather than trivial.
+11. **Camera: YES ❤️** See §9.1.
+
 ## 15. Still open
-- Player background: who is this explorer, why are they on the river, and is that chosen or fixed?
-- NPC companions on the raft (solo player, but a dog? a hired hand? a stranger picked up on the bank?).
-- Late-game engine (salvaged steam launch) or always muscle and current?
-- Photography (glass plate camera) in the journal?
+- The name and look of the companion species list, and whether more than one companion is allowed.
+- Exact backgrounds list and their starting kits.
 
 ---
 
