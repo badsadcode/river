@@ -3,10 +3,13 @@
 shader_type spatial;
 render_mode cull_back, specular_schlick_ggx;
 
+// Floating origin (World/Origin.cs): scene position + world_origin = world position, for patterns and clipping.
+global uniform vec3 world_origin;
+
 varying vec3 v_world;
 
 void vertex() {
-	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz + world_origin;
 }
 
 void fragment() {

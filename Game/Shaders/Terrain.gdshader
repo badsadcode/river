@@ -3,6 +3,9 @@
 shader_type spatial;
 render_mode cull_back, specular_schlick_ggx;
 
+// Floating origin (World/Origin.cs): scene position + world_origin = world position, for patterns and clipping.
+global uniform vec3 world_origin;
+
 uniform sampler2D shape_tex : filter_linear, repeat_disable;  // eta, shore distance, terrain height
 uniform vec2 field_size = vec2(601.0, 1601.0);
 uniform float field_cell = 2.0;
@@ -31,7 +34,7 @@ varying vec3 v_world;
 varying vec3 v_wnormal;
 
 void vertex() {
-	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz + world_origin;
 	v_wnormal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	v_local = VERTEX.xz;
 }

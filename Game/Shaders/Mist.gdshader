@@ -2,6 +2,9 @@
 // Used by a FogVolume covering the reach (EnvironmentRig.cs); strength comes from the time-of-day preset.
 shader_type fog;
 
+// Floating origin (World/Origin.cs): scene position + world_origin = world position.
+global uniform vec3 world_origin;
+
 uniform sampler2D shape_tex : filter_linear, repeat_disable;  // eta, shore distance, terrain height
 uniform vec2 field_size = vec2(601.0, 1601.0);
 uniform float field_cell = 2.0;
@@ -15,7 +18,7 @@ uniform vec2 frame_origin = vec2(0.0);
 uniform vec2 frame_rot = vec2(1.0, 0.0);
 
 void fog() {
-	vec3 wp = WORLD_POSITION;
+	vec3 wp = WORLD_POSITION + world_origin;   // scene → world (floating origin)
 	vec2 d = wp.xz - frame_origin;
 	vec2 local = vec2(d.x * frame_rot.x - d.y * frame_rot.y, d.x * frame_rot.y + d.y * frame_rot.x);
 	vec2 fuv = (local / field_cell + 0.5) / field_size;

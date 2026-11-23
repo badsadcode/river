@@ -2,13 +2,16 @@
 shader_type spatial;
 render_mode cull_back, specular_schlick_ggx;
 
+// Floating origin (World/Origin.cs): scene position + world_origin = world position, for patterns and clipping.
+global uniform vec3 world_origin;
+
 uniform float sway = 0.035;
 uniform float translucency = 0.35;
 
 varying vec3 v_tint;
 
 void vertex() {
-	vec3 base = MODEL_MATRIX[3].xyz;
+	vec3 base = MODEL_MATRIX[3].xyz + world_origin;
 	float phase = base.x * 0.13 + base.z * 0.07;
 	float h = max(VERTEX.y, 0.0);
 	float s = sin(TIME * 1.1 + phase) * 0.6 + sin(TIME * 2.3 + phase * 1.7) * 0.4;

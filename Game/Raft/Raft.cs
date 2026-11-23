@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Godot;
 using River.Core;
+using River.World;
 
 namespace River.Raft;
 
@@ -90,19 +91,22 @@ public partial class Raft : RigidBody3D
 
     // ------------------------------------------------------------------ water sampling
 
-    public float WaterHeight(float x, float z) => World.EtaAt(x, z) + SmallWaves(x, z, _time);
+    // All take scene coordinates (the floating origin, World/Origin.cs) and ask the river in world coordinates.
+
+    public float WaterHeight(float x, float z)
+    {
+        double wx = x + Origin.X, wz = z + Origin.Z;
+        return World.EtaAt(wx, wz) + SurfaceWaves.Total(World, wx, wz, _time);
+    }
 
     public Vector3 WaterVelocity(float x, float z)
     {
-        var (vx, vz) = World.VelocityAt(x, z);
+        var (vx, vz) = World.VelocityAt(x + Origin.X, z + Origin.Z);
         return new Vector3(vx, 0, vz);
     }
 
     /// <summary>Bed height (for poling, anchoring, grounding).</summary>
-    public float BedHeight(float x, float z) => World.HeightAt(x, z);
-
-    /// <summary>The same surface the water mesh shows (Core/SurfaceWaves.cs): swell, chop, standing waves, rock pillows.</summary>
-    float SmallWaves(float x, float z, float t) => SurfaceWaves.Total(World, x, z, t);
+    public float BedHeight(float x, float z) => World.HeightAt(x + Origin.X, z + Origin.Z);
 
     // ------------------------------------------------------------------ controls
 

@@ -129,6 +129,9 @@ public partial class Main : Node3D
             }
             else GD.PushWarning($"--start={startAt}: nothing like that found");
         }
+        // The floating origin starts where the raft does (D20): the scene is built around it.
+        int i = c.RiverIndexAt(_startSigma);
+        Origin.Set(c.X[i], c.Z[i]);
         var sw = Stopwatch.StartNew();
         Streamer.LoadSync(startK, Capturing ? 1 : 0);
         GD.Print($"River ready around segment {StartSegment} in {sw.ElapsedMilliseconds} ms " +
@@ -138,9 +141,8 @@ public partial class Main : Node3D
         AddChild(FlyCam);
 
         // The raft starts on the river's centre line, pointing downstream.
-        int i = c.RiverIndexAt(_startSigma);
         float h = c.Heading[i];
-        var start = new Vector3((float)c.X[i], World.EtaAt(c.X[i], c.Z[i]) + 0.1f, (float)c.Z[i]);
+        var start = Origin.ToScene(c.X[i], World.EtaAt(c.X[i], c.Z[i]) + 0.1f, c.Z[i]);
         Raft = new Raft.Raft { Name = "Raft" };
         AddChild(Raft);
         Raft.Setup(World, start, MathF.Atan2(-MathF.Sin(h), -MathF.Cos(h)));
@@ -148,6 +150,11 @@ public partial class Main : Node3D
         Raft.AddChild(Player);
         Player.Setup(Raft);
         Streamer.Focus = () => Raft.GlobalPosition;
+        Origin.Shifted += d =>
+        {
+            Raft.GlobalPosition -= d;
+            FlyCam.GlobalPosition -= d;
+        };
 
         if (_args.TryGetValue("time", out var t)) Env.ApplyPreset(int.Parse(t) % EnvironmentRig.PresetNames.Length);
 
@@ -183,9 +190,9 @@ public partial class Main : Node3D
         if (Raft == null) return;
         // The visible waves run on the raft's physics clock, so the raft rides exactly the waves on screen.
         foreach (var m in Streamer.WaterMaterials) m.SetShaderParameter(WaveTimeName, Raft.WaveTime);
-        var p = Raft.GlobalPosition;
+        var (px, pz) = Origin.ToWorld(Raft.GlobalPosition);
         if (_sigmaHint == 0) _sigmaHint = (int)(_startSigma / Course.ValleyStep);
-        var (sigma, _, idx) = World.Course.ProjectOnValley(p.X, p.Z, _sigmaHint);
+        var (sigma, _, idx) = World.Course.ProjectOnValley(px, pz, _sigmaHint);
         _sigmaHint = idx;
         Distance = (float)(sigma - _startSigma);
     }
@@ -273,10 +280,23 @@ public partial class Main : Node3D
     Vector3 Ground(double x, double z, float up)
     {
         var s = World.At(x, z);
-        return new Vector3((float)x, MathF.Max(s.Height, s.Eta) + up, (float)z);
+        return Origin.ToScene(x, MathF.Max(s.Height, s.Eta) + up, z);
     }
 
-    Vector3 OnWater(double x, double z, float up) => new((float)x, World.EtaAt(x, z) + up, (float)z);
+    /// <summary>A scene point on the water at world (x, z), <paramref name="up"/> above it.</summary>
+    Vector3 OnWater(double x, double z, float up) => Origin.ToScene(x, World.EtaAt(x, z) + up, z);
+
+    /// <summary>The river at a scene position.</summary>
+    RiverSample RiverAt(Vector3 scene) { var (x, z) = Origin.ToWorld(scene); return World.At(x, z); }
+    int SegmentAtScene(Vector3 scene) { var (x, z) = Origin.ToWorld(scene); return World.SegmentAt(x, z); }
+
+    public override void _PhysicsProcess(double delta)
+    {
+        // Keep the scene near the raft (between physics steps, before the raft integrates this one).
+        if (Raft == null) return;
+        var p = Raft.GlobalPosition;
+        if (p.X * p.X + p.Z * p.Z > Origin.ShiftDistance * Origin.ShiftDistance) Origin.Shift(p);
+    }
 
     void ApplyShot(string name)
     {
@@ -500,8 +520,8 @@ public partial class Main : Node3D
             }
             else ApplyShot(name);
             var cp = FlyCam.GlobalPosition;
-            var here = World.At(cp.X, cp.Z);
-            GD.Print($"Shot {name}: camera at {cp.X:F0}, {cp.Y:F1}, {cp.Z:F0} (segment {World.SegmentAt(cp.X, cp.Z)}, covered {World.Covers(cp.X, cp.Z)}, " +
+            var here = RiverAt(cp);
+            GD.Print($"Shot {name}: camera at {cp.X:F0}, {cp.Y:F1}, {cp.Z:F0} (segment {SegmentAtScene(cp)}, covered {World.Covers(Origin.ToWorld(cp).x, Origin.ToWorld(cp).z)}, " +
                      $"ground {here.Height:F1}, water {here.Eta:F1}), {Streamer.DrawnCount} segments drawn");
 
             for (int i = 0; i < frames; i++) await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
@@ -524,14 +544,20 @@ public partial class Main : Node3D
         Engine.TimeScale = 1.0;
         Engine.MaxPhysicsStepsPerFrame = 1000;
         var start = Raft.GlobalPosition;
+        var startWorld = Origin.ToWorld(start);
         float maxTilt = 0f, maxSpeed = 0f, t = 0f, nextLog = 0f, nextStream = 0f;
         double worstFrameMs = 0, windowFrameMs = 0, windowFrameSum = 0; int windowFrames = 0, windowSlow = 0, totalSlow = 0, totalFrames = 0;
-        int firstSeg = World.SegmentAt(start.X, start.Z), lastSeg = firstSeg, seamsCrossed = 0, groundedAtSeam = 0;
+        int firstSeg = SegmentAtScene(start), lastSeg = firstSeg, seamsCrossed = 0, groundedAtSeam = 0;
         bool wasGrounded = false;
         int gc1 = GC.CollectionCount(1), gc2 = GC.CollectionCount(2);
         var gcPause = GC.GetTotalPauseDuration(); long gcAlloc = GC.GetTotalAllocatedBytes();
         long memStart = (long)OS.GetStaticMemoryUsage(), memPeak = memStart;
         double fpsSum = 0, fpsMin = double.MaxValue; int fpsN = 0;
+        // Floating origin check: every 30 s shift the world by however far the raft is from the scene origin (plus
+        // the automatic shifts past 1 km). The water at a fixed world point must not change across a shift.
+        int shifts = 0, autoShifts = 0; float worstShiftJump = 0f, nextShift = 30f;
+        void OnShift(Vector3 d) => autoShifts++;
+        Origin.Shifted += OnShift;
         var frame = Stopwatch.StartNew();
         GD.Print("DRIFT t, x, z, speed, water speed, depth, tilt");
         while (t < seconds)
@@ -545,23 +571,34 @@ public partial class Main : Node3D
                 if (ms > 8.0) { windowSlow++; totalSlow++; }
                 fpsSum += Engine.GetFramesPerSecond(); fpsN++; fpsMin = Math.Min(fpsMin, Engine.GetFramesPerSecond());
             }
+            if (t >= nextShift)
+            {
+                nextShift += 30f;
+                var probe = Raft.GlobalPosition + new Vector3(3f, 0f, 2f);
+                float before = Raft.WaterHeight(probe.X, probe.Z);
+                var d = Origin.Shift(Raft.GlobalPosition + new Vector3(37f, 0f, -21f));
+                float after = Raft.WaterHeight(probe.X - d.X, probe.Z - d.Z);
+                worstShiftJump = MathF.Max(worstShiftJump, MathF.Abs(after - before));
+                shifts++;
+            }
             var up = Raft.GlobalTransform.Basis.Y;
             maxTilt = MathF.Max(maxTilt, Mathf.RadToDeg(up.AngleTo(Vector3.Up)));
             maxSpeed = MathF.Max(maxSpeed, Raft.LinearVelocity.Length());
             var p = Raft.GlobalPosition;
-            int seg = World.SegmentAt(p.X, p.Z);
+            var (pwx, pwz) = Origin.ToWorld(p);
+            int seg = World.SegmentAt(pwx, pwz);
             if (seg != lastSeg) { seamsCrossed++; lastSeg = seg; }
             if (Raft.Grounded && !wasGrounded)
             {
-                double toCut = Math.Min(Math.Abs(World.PastCut(seg, p.X, p.Z)), Math.Abs(World.PastCut(seg + 1, p.X, p.Z)));
-                GD.Print($"GROUND {t,6:F0} s at {p.X:F0}, {p.Z:F0}: segment {seg}, {toCut:F0} m from the nearest cut, depth {World.DepthAt(p.X, p.Z):F2} m");
+                double toCut = Math.Min(Math.Abs(World.PastCut(seg, pwx, pwz)), Math.Abs(World.PastCut(seg + 1, pwx, pwz)));
+                GD.Print($"GROUND {t,6:F0} s at {pwx:F0}, {pwz:F0}: segment {seg}, {toCut:F0} m from the nearest cut, depth {World.DepthAt(pwx, pwz):F2} m");
                 if (toCut < RiverWorld.Blend) groundedAtSeam++;
             }
             wasGrounded = Raft.Grounded;
             if (t >= nextLog)
             {
-                var s = World.At(p.X, p.Z);
-                GD.Print($"DRIFT {t,6:F0} {p.X,8:F1} {p.Z,8:F1} {Raft.LinearVelocity.Length(),5:F2} {MathF.Sqrt(s.VelX * s.VelX + s.VelZ * s.VelZ),5:F2} {s.Depth,5:F2} {Mathf.RadToDeg(up.AngleTo(Vector3.Up)),5:F1}");
+                var s = World.At(pwx, pwz);
+                GD.Print($"DRIFT {t,6:F0} {pwx,8:F1} {pwz,8:F1} {Raft.LinearVelocity.Length(),5:F2} {MathF.Sqrt(s.VelX * s.VelX + s.VelZ * s.VelZ),5:F2} {s.Depth,5:F2} {Mathf.RadToDeg(up.AngleTo(Vector3.Up)),5:F1}");
                 nextLog += 10f;
             }
             if (t >= nextStream)
@@ -581,7 +618,7 @@ public partial class Main : Node3D
                 nextStream += 600f;
             }
         }
-        var end = Raft.GlobalPosition;
+        var endWorld = Origin.ToWorld(Raft.GlobalPosition);
         // Steering check: full sweep-oar for 12 s, then sculling forward for 20 s.
         float yaw0 = Raft.GlobalRotation.Y;
         Raft.ForcedSteer = 1f;
@@ -607,10 +644,13 @@ public partial class Main : Node3D
         long memEnd = (long)OS.GetStaticMemoryUsage();
         GD.Print($"STEER RESULT: oar turned the raft {turned:F0}° in 12 s (max {Mathf.RadToDeg(maxYawRate):F1}°/s), " +
                  $"{Mathf.RadToDeg(yawAfter):F1}°/s left 8 s after letting go; sculling: {relMax:F2} m/s through the water");
-        GD.Print($"DRIFT RESULT: travelled {Distance / 1000f:F2} km down the valley ({start.DistanceTo(end):F0} m straight), " +
+        GD.Print($"DRIFT RESULT: travelled {Distance / 1000f:F2} km down the valley ({Math.Sqrt((endWorld.x - startWorld.x) * (endWorld.x - startWorld.x) + (endWorld.z - startWorld.z) * (endWorld.z - startWorld.z)):F0} m straight), " +
                  $"segments {firstSeg} → {lastSeg} ({seamsCrossed} seams crossed), max speed {maxSpeed:F2} m/s, max tilt {maxTilt:F1}°, " +
                  $"grounded {Raft.GroundedTime:F0} s ({groundedAtSeam} times within {RiverWorld.Blend:F0} m of a seam)");
         totalFrames += windowFrames;
+        Origin.Shifted -= OnShift;
+        GD.Print($"SHIFT RESULT: {shifts} forced origin shifts ({autoShifts - shifts} automatic), water height jump at a fixed world point " +
+                 $"{worstShiftJump * 1000f:F2} mm; raft {Raft.GlobalPosition.Length():F0} m from the scene origin, origin at {Origin.X:F0}, {Origin.Z:F0}");
         GD.Print($"STREAM RESULT: rendering {fpsSum / Math.Max(1, fpsN):F0} fps mean, {(fpsN > 0 ? fpsMin : 0):F0} lowest; worst frame {worstFrameMs:F1} ms after the first 5 s, {totalSlow} of {totalFrames} frames over 8 ms, " +
                  $"memory {memStart / 1048576} → {memEnd / 1048576} MB (peak {memPeak / 1048576} MB)");
         GetTree().Quit();

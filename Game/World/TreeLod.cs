@@ -5,22 +5,27 @@ using Godot;
 
 namespace River.World;
 
-/// <summary>One segment's trees in world space, bucketed in <see cref="TreeLod.Cell"/>-metre cells.</summary>
+/// <summary>
+/// One segment's trees, bucketed in <see cref="TreeLod.Cell"/>-metre world cells. Transforms are in world axes but
+/// relative to the segment's frame origin (OX, OZ), kept in double: the scene position follows the floating origin.
+/// </summary>
 public sealed class TreeSet
 {
+    public readonly double OX, OZ;
     public Transform3D[] Xf;
     public ushort[] Id;                                   // TreeLibrary.All index
     public readonly Dictionary<long, List<int>> Cells = new();
 
     public static long Key(int cx, int cz) => ((long)cx << 32) ^ (uint)cz;
 
-    public TreeSet(List<(Transform3D xf, ushort id)> trees)
+    public TreeSet(List<(Transform3D xf, ushort id)> trees, double ox, double oz)
     {
+        OX = ox; OZ = oz;
         Xf = new Transform3D[trees.Count]; Id = new ushort[trees.Count];
         for (int i = 0; i < trees.Count; i++)
         {
             Xf[i] = trees[i].xf; Id[i] = trees[i].id;
-            long k = Key((int)MathF.Floor(Xf[i].Origin.X / TreeLod.Cell), (int)MathF.Floor(Xf[i].Origin.Z / TreeLod.Cell));
+            long k = Key((int)Math.Floor((OX + Xf[i].Origin.X) / TreeLod.Cell), (int)Math.Floor((OZ + Xf[i].Origin.Z) / TreeLod.Cell));
             if (!Cells.TryGetValue(k, out var l)) Cells[k] = l = new List<int>();
             l.Add(i);
         }
@@ -54,6 +59,7 @@ public partial class TreeLod : Node3D
 
     public override void _Ready()
     {
+        Origin.Shifted += _ => { _dirty = true; };
         int n = TreeLibrary.All.Count * 3;
         _mm = new MultiMesh[n]; _buf = new float[n][]; _count = new int[n];
         for (int v = 0; v < TreeLibrary.All.Count; v++)
@@ -73,7 +79,7 @@ public partial class TreeLod : Node3D
 
     public void Add(int k, TreeSet s) { _sets[k] = s; _dirty = true; }
 
-    /// <summary>The tree of a species nearest to a point (screenshots, debugging); null if none is loaded.</summary>
+    /// <summary>The tree of a species nearest to a scene point (screenshots, debugging), in the scene; null if none.</summary>
     public Vector3? Nearest(int species, Vector3 near)
     {
         Vector3? best = null; float bd = float.MaxValue;
@@ -81,8 +87,9 @@ public partial class TreeLod : Node3D
             for (int i = 0; i < set.Xf.Length; i++)
             {
                 if (TreeLibrary.All[set.Id[i]].Species != species) continue;
-                float d = set.Xf[i].Origin.DistanceSquaredTo(near);
-                if (d < bd) { bd = d; best = set.Xf[i].Origin; }
+                var o = set.Xf[i].Origin + new Vector3((float)(set.OX - Origin.X), 0f, (float)(set.OZ - Origin.Z));
+                float d = o.DistanceSquaredTo(near);
+                if (d < bd) { bd = d; best = o; }
             }
         return best;
     }
@@ -108,24 +115,29 @@ public partial class TreeLod : Node3D
         Array.Clear(_count);
         var lib = TreeLibrary.All;
         float range = TreeLibrary.MaxLodEnd;
-        int c0x = (int)MathF.Floor((cam.X - range) / Cell), c1x = (int)MathF.Floor((cam.X + range) / Cell);
-        int c0z = (int)MathF.Floor((cam.Z - range) / Cell), c1z = (int)MathF.Floor((cam.Z + range) / Cell);
+        var (wx, wz) = Origin.ToWorld(cam);
+        int c0x = (int)Math.Floor((wx - range) / Cell), c1x = (int)Math.Floor((wx + range) / Cell);
+        int c0z = (int)Math.Floor((wz - range) / Cell), c1z = (int)Math.Floor((wz + range) / Cell);
         foreach (var s in _sets.Values)
+        {
+            var shift = new Vector3((float)(s.OX - Origin.X), 0f, (float)(s.OZ - Origin.Z));   // set → scene
             for (int cz = c0z; cz <= c1z; cz++)
                 for (int cx = c0x; cx <= c1x; cx++)
                 {
                     if (!s.Cells.TryGetValue(TreeSet.Key(cx, cz), out var list)) continue;
                     foreach (int i in list)
                     {
-                        var o = s.Xf[i].Origin;
+                        var o = s.Xf[i].Origin + shift;
                         float ddx = o.X - cam.X, ddz = o.Z - cam.Z, d = MathF.Sqrt(ddx * ddx + ddz * ddz);
                         var tv = lib[s.Id[i]];
                         var end = TreeLibrary.Species[tv.Species].LodEnd;
                         int lod = d < end[0] ? 0 : d < end[1] ? 1 : d < end[2] ? 2 : -1;
                         if (lod < 0) continue;
-                        Put(tv.Id * 3 + lod, s.Xf[i]);
+                        var t = s.Xf[i]; t.Origin = o;
+                        Put(tv.Id * 3 + lod, t);
                     }
                 }
+        }
         int drawn = 0;
         for (int j = 0; j < _mm.Length; j++)
         {

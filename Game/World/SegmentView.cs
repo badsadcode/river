@@ -31,7 +31,7 @@ public sealed class SegmentView
         v.Root = new Node3D
         {
             Name = $"Segment{k}",
-            Position = new Vector3((float)f.Frame.OriginX, 0f, (float)f.Frame.OriginZ),
+            Position = Origin.ToScene(f.Frame.OriginX, 0f, f.Frame.OriginZ),   // the streamer re-places it on the main thread
             Rotation = new Vector3(0f, f.Frame.Heading, 0f),
         };
         var tex = new FieldTextures(f);
@@ -52,9 +52,10 @@ public sealed class SegmentView
         var veg = Vegetation.Build(f, Owns, trees);
         if (trees.Count > 0)
         {
-            var rootXf = new Transform3D(new Basis(Vector3.Up, f.Frame.Heading), v.Root.Position);
-            for (int i = 0; i < trees.Count; i++) trees[i] = (rootXf * trees[i].Item1, trees[i].Item2);
-            v.Trees = new TreeSet(trees);
+            // Rotated into world axes, relative to the frame origin (TreeSet keeps that origin in double).
+            var rot = new Transform3D(new Basis(Vector3.Up, f.Frame.Heading), Vector3.Zero);
+            for (int i = 0; i < trees.Count; i++) trees[i] = (rot * trees[i].Item1, trees[i].Item2);
+            v.Trees = new TreeSet(trees, f.Frame.OriginX, f.Frame.OriginZ);
         }
         v.Mist = env.CreateMist(f, tex);
 
@@ -72,6 +73,9 @@ public sealed class SegmentView
         v.Pending.Enqueue((v.Root, v.Mist));
         return v;
     }
+
+    /// <summary>Place the root in the scene for the current floating origin (main thread: on attach and after shifts).</summary>
+    public void Place() => Root.Position = Origin.ToScene(Field.Frame.OriginX, 0f, Field.Frame.OriginZ);
 
     /// <summary>Cut-line clipping on this segment's materials (only once the neighbour on that side is drawn).</summary>
     public void SetClips(RiverWorld world, bool upstreamNeighbour, bool downstreamNeighbour)

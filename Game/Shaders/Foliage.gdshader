@@ -9,6 +9,9 @@
 shader_type spatial;
 render_mode cull_back, specular_schlick_ggx;
 
+// Floating origin (World/Origin.cs): scene position + world_origin = world position, for patterns and clipping.
+global uniform vec3 world_origin;
+
 global uniform vec3 tree_camera;
 
 uniform sampler2D albedo_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
@@ -29,7 +32,7 @@ void vertex() {
 	if (hide_within > 0.0 && distance(origin.xz, tree_camera.xz) < hide_within) {
 		VERTEX = vec3(0.0);   // a point: nothing rasterised
 	} else {
-		float phase = origin.x * 0.11 + origin.z * 0.07;
+		float phase = (origin.x + world_origin.x) * 0.11 + (origin.z + world_origin.z) * 0.07;
 		float h = clamp(VERTEX.y / max(tree_height, 1.0), 0.0, 1.5);
 		float gust = sin(TIME * 0.9 + phase) * 0.6 + sin(TIME * 2.1 + phase * 1.7) * 0.4;
 		vec2 dir = vec2(0.8, 0.6);

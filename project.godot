@@ -44,3 +44,8 @@ tree_camera={
 "type": "vec3",
 "value": Vector3(0, 0, 0)
 }
+
+world_origin={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}

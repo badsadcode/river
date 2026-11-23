@@ -109,9 +109,11 @@ public static class SurfaceWaves
     }
 
     /// <summary>Everything above the solved level at a world point of the endless river (what the raft floats on).</summary>
-    public static float Total(RiverWorld w, float x, float z, float t)
+    public static float Total(RiverWorld w, double wx, double wz, float t)
     {
-        var s = w.At(x, z);
+        var s = w.At(wx, wz);
+        // Patterns in float world coordinates, as the shader computes them (scene position + world_origin).
+        float x = (float)wx, z = (float)wz;
         float h = Height(x, z, t, s.VelX, s.VelZ, s.Depth, s.Eddy);
         var rocks = w.Rocks;
         for (int i = 0; i < rocks.Count; i++) h += RockBump(x, z, rocks[i]);   // indexed: no boxed enumerator per call

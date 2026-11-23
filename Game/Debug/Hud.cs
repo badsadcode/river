@@ -1,5 +1,6 @@
 using System;
 using Godot;
+using River.World;
 
 namespace River.Debug;
 
@@ -53,9 +54,9 @@ public partial class Hud : CanvasLayer
         string state = pl.AtOar ? "at the sweep oar" : pl.Poling ? "poling" : pl.Swimming ? "swimming" : pl.OnRaft ? "on deck" : "ashore";
         string line = $"{main.Env.TimeLabel} · {state}{(r.AnchorDown ? " · anchored" : "")}{(r.Grounded ? " · aground!" : "")}";
         if (_showInfo)
-            line += $"\nraft {r.LinearVelocity.Length():F2} m/s · current {wv.Length():F2} m/s · depth {main.World.DepthAt(p.X, p.Z):F1} m · " +
+            line += $"\nraft {r.LinearVelocity.Length():F2} m/s · current {wv.Length():F2} m/s · depth {main.World.DepthAt(p.X + Origin.X, p.Z + Origin.Z):F1} m · " +
                     $"sun {main.Env.SunElevation:F0}° · {Engine.GetFramesPerSecond()} fps · pos {p.X:F0}, {p.Z:F0} · " +
-                    $"segment {main.World.SegmentAt(p.X, p.Z)} · {main.Distance / 1000f:F1} km";
+                    $"segment {main.World.SegmentAt(p.X + Origin.X, p.Z + Origin.Z)} · {main.Distance / 1000f:F1} km";
         _info.Text = line;
         _info.Position = new Vector2(24, _showHelp ? 70 : 20);
     }

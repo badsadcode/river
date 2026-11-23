@@ -8,6 +8,9 @@
 shader_type spatial;
 render_mode cull_back, specular_schlick_ggx;
 
+// Floating origin (World/Origin.cs): scene position + world_origin = world position, for patterns and clipping.
+global uniform vec3 world_origin;
+
 instance uniform float water_level = 0.0;              // local water surface height (m)
 instance uniform vec4 flow = vec4(0.0, 1.0, 0.0, 1.0);  // current direction x, z (unit), speed (m/s), rock radius (m)
 
@@ -36,8 +39,8 @@ float fbm(vec2 p) {
 }
 
 void vertex() {
-	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	v_centre = MODEL_MATRIX[3].xyz;
+	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz + world_origin;
+	v_centre = MODEL_MATRIX[3].xyz + world_origin;
 }
 
 void fragment() {

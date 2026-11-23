@@ -1,5 +1,6 @@
 using System;
 using Godot;
+using River.World;
 
 namespace River.Player;
 
@@ -43,6 +44,14 @@ public partial class PlayerController : CharacterBody3D
         AddChild(_cam);
         _chase = new Camera3D { Name = "Chase", Fov = 60f, Near = 0.1f, Far = 9000f, TopLevel = true };
         AddChild(_chase);
+        // Floating origin: on the raft the player moves with it; in the water (a child of Main) and the free-standing
+        // chase camera must be moved back by the shift themselves.
+        Origin.Shifted += d =>
+        {
+            if (!IsInstanceValid(this)) return;
+            if (GetParent() != _raft) GlobalPosition -= d;
+            _chase.GlobalPosition -= d;
+        };
         // Start on the deck behind the tent, facing the bow.
         Position = new Vector3(0.6f, Raft.Raft.DeckTop + 0.05f, Raft.Raft.Length * 0.32f);
         _yaw = 0f;
@@ -255,7 +264,8 @@ public partial class PlayerController : CharacterBody3D
         var focus = OnRaft || _atOar ? _raft.GlobalPosition + Vector3.Up * 1.2f : GlobalPosition + Vector3.Up * 1.4f;
         var offset = new Vector3(MathF.Sin(_chaseYaw) * MathF.Cos(_chasePitch), -MathF.Sin(_chasePitch), MathF.Cos(_chaseYaw) * MathF.Cos(_chasePitch)) * _chaseDist;
         var pos = focus + offset;
-        var here = Main.Instance.World.At(pos.X, pos.Z);
+        var (hx, hz) = Origin.ToWorld(pos);
+        var here = Main.Instance.World.At(hx, hz);
         float ground = MathF.Max(here.Height, here.Eta);
         pos.Y = MathF.Max(pos.Y, ground + 1.0f);
         _chase.GlobalPosition = _chase.GlobalPosition.Lerp(pos, 1f - MathF.Exp(-dt * 5f));

@@ -10,6 +10,9 @@
 shader_type spatial;
 render_mode blend_mix, cull_back, depth_draw_opaque, specular_schlick_ggx;
 
+// Floating origin (World/Origin.cs): scene position + world_origin = world position, for patterns and clipping.
+global uniform vec3 world_origin;
+
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap, repeat_disable;
 uniform sampler2D depth_tex : hint_depth_texture, filter_nearest, repeat_disable;
 
@@ -154,7 +157,7 @@ float surface_height(vec2 p, vec2 q, vec2 v_world_dir, float depth, float calm) 
 }
 
 void vertex() {
-	vec3 w = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	vec3 w = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz + world_origin;
 	vec2 q = VERTEX.xz;
 	vec4 f = textureLod(flow_tex, field_uv(q), 0.0);
 	float calm = textureLod(shape_tex, field_uv(q), 0.0).a;
@@ -167,7 +170,7 @@ void vertex() {
 	float hz = surface_height(w.xz + vec2(0.0, e), q + qz, vw, f.z, calm);
 	v_wave_grad = vec2(hx - h, hz - h) / e * wave_strength;   // world-space slope
 	VERTEX.y += h * wave_strength;
-	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz + world_origin;
 	v_local = VERTEX.xz;
 }
 

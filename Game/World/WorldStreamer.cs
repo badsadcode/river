@@ -64,6 +64,7 @@ public partial class WorldStreamer : Node3D
         _cs = cs; _cacheDir = cacheDir; _cacheKey = cacheKey; Env = env;
         // "--no-trees" (after "--"): the old placeholder trees (performance comparisons, weak machines).
         if (Array.IndexOf(OS.GetCmdlineUserArgs(), "--no-trees") < 0) TreeLibrary.Load();
+        Origin.Shifted += _ => { foreach (var v in _views.Values) v.Place(); };
         if (TreeLibrary.Loaded) { Trees = new TreeLod { Name = "Trees" }; AddChild(Trees); }
         World = new RiverWorld(new Course(cs));
         _wCourse = new Course(cs);
@@ -184,8 +185,8 @@ public partial class WorldStreamer : Node3D
         if (World == null) return;
         if (Focus != null)
         {
-            var p = Focus();
-            _focusK = Math.Max(1, World.SegmentAt(p.X, p.Z));
+            var (fx, fz) = Origin.ToWorld(Focus());
+            _focusK = Math.Max(1, World.SegmentAt(fx, fz));
         }
         int f = _focusK;
         DrainRaw();
@@ -242,6 +243,7 @@ public partial class WorldStreamer : Node3D
                 continue;
             }
             _views[v.K] = v;
+            v.Place();
             AddChild(v.Root);
             if (v.Trees != null) Trees?.Add(v.K, v.Trees);
             _attaching.Add(v);
