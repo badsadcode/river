@@ -277,7 +277,10 @@ public partial class Main : Node3D
 
         if (seconds > 0f)
         {
-            // Let physics run (raft drifting) faster than real time before framing the shots.
+            // Let physics run (raft drifting) faster than real time before framing the shots. More ticks per second
+            // keep each physics step at 1/60 s: scaling time alone made 0.13 s steps and the raft went unstable.
+            int ticks = Engine.PhysicsTicksPerSecond;
+            Engine.PhysicsTicksPerSecond = ticks * 8;
             Engine.TimeScale = 8.0;
             Engine.MaxPhysicsStepsPerFrame = 64;
             double simulated = 0;
@@ -287,6 +290,7 @@ public partial class Main : Node3D
                 simulated += GetPhysicsProcessDeltaTime();
             }
             Engine.TimeScale = 1.0;
+            Engine.PhysicsTicksPerSecond = ticks;
         }
 
         foreach (var entry in names)

@@ -64,6 +64,9 @@ void fragment() {
 	float eta = inside ? sh.r : far_eta_a + far_eta_b * v_world.z;
 	float shore = inside ? sh.g : 200.0;
 	float above = v_world.y - eta;
+	// Water is only drawn within ~5 m of the shore (WaterBuilder). Floodplain hollows further out can dip below the
+	// nearby river level, but they are dry ground, not riverbed.
+	if (shore > 4.5) above = max(above, 0.3);
 	float slope = 1.0 - clamp(v_wnormal.y, 0.0, 1.0);
 
 	vec2 p = v_world.xz;

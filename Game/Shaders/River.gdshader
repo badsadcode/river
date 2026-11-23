@@ -23,11 +23,11 @@ uniform float field_cell = 2.0;
 uniform sampler2D ripple_large : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D ripple_small : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D foam_tex : filter_linear_mipmap_anisotropic, repeat_enable;
-uniform float large_scale = 9.0;      // metres per ripple_large tile
-uniform float small_scale = 2.3;
-uniform float flow_cycle = 1.4;       // seconds per flow-map phase (shorter = less stretching in shear)
+uniform float large_scale = 13.0;     // metres per ripple_large tile
+uniform float small_scale = 3.6;
+uniform float flow_cycle = 2.0;       // seconds per flow-map phase (shorter = less stretching in shear)
 uniform float ripple_strength = 0.55;
-uniform float ripple_speed = 0.25;    // m/s: how fast small ripples travel on their own across the water
+uniform float ripple_speed = 0.12;    // m/s: how fast small ripples travel on their own across the water
 uniform float adv_smooth = 3.0;       // m: radius over which the texture-carrying current is averaged
 uniform float adv_cap = 1.8;          // m/s: textures never race faster than this (fast riffles smear otherwise)
 uniform vec2 wind = vec2(0.6, 0.25);  // m/s-ish, drives ripples on slow water
@@ -61,8 +61,21 @@ vec2 field_uv(vec2 xz) {
 	return (xz / field_cell + 0.5) / field_size;
 }
 
+// Mirror of SurfaceWaves.Gust(): wind strength patches, shared by the waves and the ripples.
+float gust(vec2 p, float t) {
+	float g = 0.5 + 0.5 * (0.5 * sin(0.023 * p.x + 0.011 * p.y + 0.13 * t)
+	                     + 0.3 * sin(-0.009 * p.x + 0.027 * p.y - 0.09 * t + 2.1)
+	                     + 0.2 * sin(0.031 * p.x - 0.017 * p.y + 0.17 * t + 4.0));
+	return smoothstep(0.2, 0.8, g);
+}
+
+float boil(vec2 q) {
+	float b = max(0.0, sin(q.x * 0.41 + 1.1) * sin(q.y * 0.33 + 0.4) + 0.4 * sin((q.x - q.y) * 0.27));
+	return b * b;
+}
+
 // Mirror of Game/Core/SurfaceWaves.cs Height(): keep the two identical, the raft floats on the C# copy.
-float wave_height(vec2 p, float t, vec2 v, float depth) {
+float wave_height(vec2 p, float t, vec2 v, float depth, float calm) {
 	float speed = length(v);
 	float fr = speed / sqrt(9.81 * max(depth, 0.08));
 	float rough = smoothstep(0.35, 0.9, fr);
@@ -70,6 +83,18 @@ float wave_height(vec2 p, float t, vec2 v, float depth) {
 	float h = 0.018 * sin(p.x * 0.31 + t * 1.7) + 0.014 * sin(p.y * 0.27 - t * 1.3 + 1.3)
 	        + 0.010 * sin((p.x + p.y) * 0.53 + t * 2.3);
 	h += rough * (0.05 * sin(p.x * 1.1 + t * 3.1) + 0.04 * sin(p.y * 1.4 - t * 3.7));
+	float wind_amp = gust(p, t) * (1.0 - 0.75 * calm) * smoothstep(0.4, 2.5, depth);
+	h += wind_amp * (0.012 * sin(p.x * 1.71 + p.y * 0.83 - t * 4.33)
+	           + 0.016 * sin(p.x * 1.26 + p.y * 0.52 - t * 3.66 + 1.9)
+	           + 0.014 * sin(p.x * 0.83 + p.y * 0.67 - t * 3.18 + 4.2));
+	float boil_k = smoothstep(0.5, 1.4, speed) * smoothstep(1.2, 2.6, depth) * (1.0 - calm);
+	if (boil_k > 0.0) {
+		const float T = 9.0;
+		float p0 = fract(t / T), p1 = fract(t / T + 0.5);
+		float w0 = 1.0 - abs(1.0 - 2.0 * p0);
+		float a = boil(p - v * p0 * T), b = boil(p - v * p1 * T + vec2(7.3, 3.1));
+		h += 0.025 * boil_k * mix(b, a, w0);
+	}
 	if (speed > 0.3) {
 		vec2 d = v / speed;
 		float along = dot(p, d), across = -p.x * d.y + p.y * d.x;
@@ -92,7 +117,7 @@ float rock_bump(vec2 p, vec4 r, vec2 fl) {
 	vec2 dv = p - r.xy;
 	float reach = r.z * 3.5;
 	if (speed < 0.05 || dot(dv, dv) > reach * reach) return 0.0;
-	float hv = min(speed * speed / (2.0 * 9.81), 0.35);
+	float hv = min(0.05 + 1.6 * speed * speed / (2.0 * 9.81), 0.45);
 	vec2 d = fl / speed;
 	float u = dot(dv, d) / r.z, v = (-dv.x * d.y + dv.y * d.x) / r.z;
 	float emerg = smoothstep(-0.6, 0.0, r.w);
@@ -104,8 +129,8 @@ float rock_bump(vec2 p, vec4 r, vec2 fl) {
 	return hv * deep * (emerg * (pillow - 0.35 * sides - 0.55 * hollow) + (1.0 - emerg) * (0.6 * hump - 0.4 * hollow));
 }
 
-float surface_height(vec2 p, vec4 f) {
-	float h = wave_height(p, wave_time, f.xy, f.z);
+float surface_height(vec2 p, vec4 f, float calm) {
+	float h = wave_height(p, wave_time, f.xy, f.z, calm);
 	for (int i = 0; i < rock_count; i++) h += rock_bump(p, rocks[i], rock_flow[i]);
 	return h;
 }
@@ -113,10 +138,11 @@ float surface_height(vec2 p, vec4 f) {
 void vertex() {
 	vec3 w = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	vec4 f = textureLod(flow_tex, field_uv(w.xz), 0.0);
+	float calm = textureLod(shape_tex, field_uv(w.xz), 0.0).a;
 	const float e = 0.3;
-	float h = surface_height(w.xz, f);
-	float hx = surface_height(w.xz + vec2(e, 0.0), f);
-	float hz = surface_height(w.xz + vec2(0.0, e), f);
+	float h = surface_height(w.xz, f, calm);
+	float hx = surface_height(w.xz + vec2(e, 0.0), f, calm);
+	float hz = surface_height(w.xz + vec2(0.0, e), f, calm);
 	v_wave_grad = vec2(hx - h, hz - h) / e * wave_strength;
 	VERTEX.y += h * wave_strength;   // water meshes are built in world space (identity model matrix)
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -217,8 +243,14 @@ void fragment() {
 	vec3 nW = unpack_n(texture(ripple_small, wuv + vec2(0.21, 0.73)).rgb);
 	vec3 nW2 = unpack_n(texture(ripple_small, (xz + wind.yx * vec2(-1.0, 1.0) * t * 1.1) / (small_scale * 1.7)).rgb);
 	float slow = 1.0 - smoothstep(0.08, 0.6, speed);
-	float wind_k = length(wind) * (0.35 + 0.65 * slow);
-	float flow_k = ripple_strength * (0.45 + 0.9 * smoothstep(0.1, 1.6, speed) + 1.2 * rough_water);
+	// Not even everywhere: wind gusts come in patches (same pattern as the wind waves), backwaters are calm, and
+	// the current's own turbulence is patchy too (slow drifting blotches).
+	float g = gust(xz, wave_time);
+	float calm = sh.a;
+	float turb = flow_scalar(foam_tex, xz, flow, 45.0, 6.0, t, jitter);
+	float wind_k = length(wind) * (0.35 + 0.65 * slow) * mix(0.12, 1.3, g) * (1.0 - 0.7 * calm);
+	float flow_k = ripple_strength * (0.45 + 0.9 * smoothstep(0.1, 1.6, speed) + 1.2 * rough_water)
+	             * mix(0.5, 1.2, turb) * mix(0.7, 1.08, g) * (1.0 - 0.5 * calm);
 	vec3 n_ts = blend_n(vec3(nL.xy * flow_k, nL.z), vec3(nS.xy * flow_k * 0.8, nS.z));
 	n_ts = blend_n(n_ts, vec3((nW.xy + nW2.xy) * 0.35 * wind_k, 1.0));
 	// The displaced waves' own slope (standing waves in riffles, chop, swell).

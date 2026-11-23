@@ -227,10 +227,8 @@ public static class Vegetation
     static Node3D BuildRocks(ReachField f)
     {
         var root = new Node3D { Name = "Rocks" };
-        var mat = new StandardMaterial3D
-        {
-            AlbedoColor = new Color(0.36f, 0.35f, 0.33f), Roughness = 0.85f,
-        };
+        // Rock.gdshader: wet band, water film and foam line, from each rock's water level and current.
+        var mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://Game/Shaders/Rock.gdshader") };
         var body = new StaticBody3D { Name = "RockCollision", CollisionLayer = 1, CollisionMask = 0 };
         root.AddChild(body);
         foreach (var r in f.Rocks)
@@ -238,8 +236,15 @@ public static class Vegetation
             var mesh = RockMesh(r.Seed, r.Radius);
             float eta = f.SampleEta(r.X, r.Z);
             var pos = new Vector3(r.X, eta + r.Top - r.Radius * 0.55f, r.Z);
-            root.AddChild(new MeshInstance3D { Mesh = mesh, MaterialOverride = mat, Position = pos });
+            var mi = new MeshInstance3D { Mesh = mesh, MaterialOverride = mat, Position = pos };
+            float speed = MathF.Sqrt(r.FlowX * r.FlowX + r.FlowZ * r.FlowZ);
+            var dir = speed > 1e-3f ? new Vector2(r.FlowX / speed, r.FlowZ / speed) : new Vector2(0, 1);
+            mi.SetInstanceShaderParameter("water_level", eta);
+            mi.SetInstanceShaderParameter("flow", new Vector4(dir.X, dir.Y, speed, r.Radius));
+            root.AddChild(mi);
             body.AddChild(new CollisionShape3D { Shape = new SphereShape3D { Radius = r.Radius * 0.85f }, Position = pos });
+            var splash = RockSplash.Create(f, r);
+            if (splash != null) root.AddChild(splash);
         }
         return root;
     }

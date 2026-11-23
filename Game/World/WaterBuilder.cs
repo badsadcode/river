@@ -18,8 +18,8 @@ public static class WaterBuilder
     {
         var mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://Game/Shaders/River.gdshader") };
         tex.Apply(mat);
-        mat.SetShaderParameter("ripple_large", ProceduralTextures.WaterNormals(512, 11, 4, 9f));
-        mat.SetShaderParameter("ripple_small", ProceduralTextures.WaterNormals(512, 23, 8, 14f));
+        mat.SetShaderParameter("ripple_large", ProceduralTextures.WaterNormals(512, 11, 4, 7f));
+        mat.SetShaderParameter("ripple_small", ProceduralTextures.WaterNormals(512, 23, 8, 10f));
         mat.SetShaderParameter("foam_tex", ProceduralTextures.Foam(512, 37));
         mat.RenderPriority = 1;
         return mat;

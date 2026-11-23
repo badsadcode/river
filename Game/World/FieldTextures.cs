@@ -6,7 +6,7 @@ namespace River.World;
 /// <summary>
 /// The reach field packed into GPU textures, shared by the water, terrain and mist shaders.
 ///   FlowTex  (RGBA half): current x, current z, depth, foam
-///   ShapeTex (RGBA half): water surface η, signed shore distance, terrain height, 0
+///   ShapeTex (RGBA half): water surface η, signed shore distance, terrain height, eddy (lee zone 0..1)
 /// Sample at uv = (world.xz / cell + 0.5) / size.
 /// </summary>
 public sealed class FieldTextures
@@ -29,6 +29,7 @@ public sealed class FieldTextures
             shape[i * 4 + 0] = f.Eta[i];
             shape[i * 4 + 1] = Mathf.Clamp(f.ShoreDist[i], -500f, 500f);
             shape[i * 4 + 2] = f.Height[i];
+            shape[i * 4 + 3] = f.Eddy != null ? f.Eddy[i] : 0f;
         }
         // Float32 rather than half: η around 20–30 m needs better than half-float's ~1 cm steps.
         FlowTex = ImageTexture.CreateFromImage(Image.CreateFromData(f.Nx, f.Nz, false, Image.Format.Rgbaf, ToBytes(flow)));

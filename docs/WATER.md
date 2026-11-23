@@ -34,10 +34,19 @@ The river's look is driven by the same data that drives the raft: the reach fiel
    upstream face, water drawn down beside them and a hollow behind, scaled by the velocity head v²/2g of the current
    approaching each rock (`Rock.FlowX/Z`; `SurfaceWaves.RockBump` ↔ shader `rock_bump`, rocks passed as a uniform
    array of up to 64).
+   Also in the shared wave function: *wind waves* (3–6 m, a few cm, in gusts and on deeper open water) and *boils*
+   (slow domes in faster deep water, drifting with the current). `Gust()` patches (hundreds of metres, drifting)
+   make the surface range from glassy to ruffled, and backwaters (the eddy field, in `shape_tex.a`) stay calm.
 9. **Living ripples and texture advection** — each ripple layer is two crossing wave trains that travel on their
    own (`ripple_speed`) while drifting with the current, so the pattern changes shape instead of sliding like a
    rigid sheet. Textures are carried by a current smoothed over ~3 m (`adv_smooth`) and capped (`adv_cap`):
    the exact current curls tightly around rocks and in eddies and wound the textures into whirlpool rings.
+   Ripple strength varies: gust patches (wind ripples), drifting turbulence blotches (current ripples), calmer in
+   backwaters.
+10. **Rocks** (Rock.gdshader, RockSplash.cs) — wet, darker, glossy stone up to where the water climbs (highest on
+   the upstream face), a thin water film streaming over the wetted stone along the current, a broken foam line at
+   the waterline, and spray particles off the upstream face scaled by the current. Per-rock values are instance
+   uniforms (`water_level`, `flow`).
 8. **Riverbed** (Terrain.gdshader) — matte under water (a glossy bed showed through as a green-yellow sun path);
    caustics ~1 m (`caustic_scale`).
 
