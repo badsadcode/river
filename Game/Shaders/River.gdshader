@@ -27,6 +27,9 @@ uniform float large_scale = 9.0;      // metres per ripple_large tile
 uniform float small_scale = 2.3;
 uniform float flow_cycle = 1.4;       // seconds per flow-map phase (shorter = less stretching in shear)
 uniform float ripple_strength = 0.55;
+uniform float ripple_speed = 0.25;    // m/s: how fast small ripples travel on their own across the water
+uniform float adv_smooth = 3.0;       // m: radius over which the texture-carrying current is averaged
+uniform float adv_cap = 1.8;          // m/s: textures never race faster than this (fast riffles smear otherwise)
 uniform vec2 wind = vec2(0.6, 0.25);  // m/s-ish, drives ripples on slow water
 
 // Water colour (a temperate, slightly turbid river)
@@ -78,13 +81,42 @@ float wave_height(vec2 p, float t, vec2 v, float depth) {
 	return h * shallow_fade;
 }
 
+// Rocks (x, z, radius, top above the surface) and the current approaching each (x, z). Set by WaterBuilder.
+uniform vec4 rocks[64];
+uniform vec2 rock_flow[64];
+uniform int rock_count = 0;
+
+// Mirror of SurfaceWaves.RockBump(): pillow upstream, drawn down beside, hollow behind.
+float rock_bump(vec2 p, vec4 r, vec2 fl) {
+	float speed = length(fl);
+	vec2 dv = p - r.xy;
+	float reach = r.z * 3.5;
+	if (speed < 0.05 || dot(dv, dv) > reach * reach) return 0.0;
+	float hv = min(speed * speed / (2.0 * 9.81), 0.35);
+	vec2 d = fl / speed;
+	float u = dot(dv, d) / r.z, v = (-dv.x * d.y + dv.y * d.x) / r.z;
+	float emerg = smoothstep(-0.6, 0.0, r.w);
+	float deep = smoothstep(-1.4, -0.6, r.w);
+	float pillow = exp(-((u + 1.05) * (u + 1.05) / 0.18 + v * v / 0.55));
+	float sides = exp(-((u - 0.2) * (u - 0.2) / 0.5 + (abs(v) - 1.15) * (abs(v) - 1.15) / 0.12));
+	float hollow = exp(-((u - 1.5) * (u - 1.5) / 0.6 + v * v / 0.35));
+	float hump = exp(-((u + 0.2) * (u + 0.2) + v * v) / 0.8);
+	return hv * deep * (emerg * (pillow - 0.35 * sides - 0.55 * hollow) + (1.0 - emerg) * (0.6 * hump - 0.4 * hollow));
+}
+
+float surface_height(vec2 p, vec4 f) {
+	float h = wave_height(p, wave_time, f.xy, f.z);
+	for (int i = 0; i < rock_count; i++) h += rock_bump(p, rocks[i], rock_flow[i]);
+	return h;
+}
+
 void vertex() {
 	vec3 w = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	vec4 f = textureLod(flow_tex, field_uv(w.xz), 0.0);
 	const float e = 0.3;
-	float h = wave_height(w.xz, wave_time, f.xy, f.z);
-	float hx = wave_height(w.xz + vec2(e, 0.0), wave_time, f.xy, f.z);
-	float hz = wave_height(w.xz + vec2(0.0, e), wave_time, f.xy, f.z);
+	float h = surface_height(w.xz, f);
+	float hx = surface_height(w.xz + vec2(e, 0.0), f);
+	float hz = surface_height(w.xz + vec2(0.0, e), f);
 	v_wave_grad = vec2(hx - h, hz - h) / e * wave_strength;
 	VERTEX.y += h * wave_strength;   // water meshes are built in world space (identity model matrix)
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -133,14 +165,43 @@ vec3 blend_n(vec3 a, vec3 b) {
 	return normalize(vec3(a.xy + b.xy, a.z * b.z));
 }
 
+// Living ripples: like flow_normal, but each phase is two crossing wave trains that also travel on their own at
+// speed c (real ripples move relative to the water). Their interference keeps changing shape, so the surface
+// lives instead of sliding downstream like one rigid sheet.
+vec3 flow_normal_live(sampler2D tex, vec2 xz, vec2 flow, float scale, float cycle, float t, float jitter, float c) {
+	float p0 = fract(t / cycle + jitter);
+	float p1 = fract(t / cycle + jitter + 0.5);
+	float w0 = 1.0 - abs(1.0 - 2.0 * p0);
+	vec2 dA = vec2(0.80, 0.60) * c * t;
+	vec2 dB = vec2(-0.71, 0.70) * c * 1.13 * t;
+	vec2 b0 = xz - flow * p0 * cycle, b1 = xz - flow * p1 * cycle;
+	vec3 a0 = unpack_n(texture(tex, (b0 - dA) / scale).rgb);
+	vec3 c0 = unpack_n(texture(tex, (b0 - dB) / (scale * 0.87) + vec2(0.41, 0.13)).rgb);
+	vec3 a1 = unpack_n(texture(tex, (b1 - dA) / scale + vec2(0.37, 0.61)).rgb);
+	vec3 c1 = unpack_n(texture(tex, (b1 - dB) / (scale * 0.87) + vec2(0.77, 0.29)).rgb);
+	vec3 n0 = normalize(vec3((a0.xy + c0.xy) * 0.72, a0.z * c0.z));
+	vec3 n1 = normalize(vec3((a1.xy + c1.xy) * 0.72, a1.z * c1.z));
+	return normalize(mix(n1, n0, w0));
+}
+
 void fragment() {
 	float t = TIME + time_offset;
 	vec2 xz = v_world.xz;
 	vec2 fuv = field_uv(xz);
 	vec4 fl = texture(flow_tex, fuv);
 	vec4 sh = texture(shape_tex, fuv);
-	vec2 flow = fl.xy;
-	float speed = length(flow);
+	vec2 flow_true = fl.xy;
+	float speed = length(flow_true);
+	// Textures are carried by a smoothed current: around rocks and in eddies the real current turns within a few
+	// metres, and dragging a texture through that winds it into whirlpool rings. Averaged over ~3 m, and the drag per
+	// flow-map cycle is capped (adv_cap) so nothing gets stretched far beyond its own size.
+	vec2 flow = 0.4 * flow_true;
+	flow += 0.15 * texture(flow_tex, field_uv(xz + vec2(adv_smooth, 0.0))).xy;
+	flow += 0.15 * texture(flow_tex, field_uv(xz - vec2(adv_smooth, 0.0))).xy;
+	flow += 0.15 * texture(flow_tex, field_uv(xz + vec2(0.0, adv_smooth))).xy;
+	flow += 0.15 * texture(flow_tex, field_uv(xz - vec2(0.0, adv_smooth))).xy;
+	float fspeed = length(flow);
+	if (fspeed > adv_cap) flow *= adv_cap / fspeed;
 	float depth_field = fl.z;
 	float shore = sh.g;                     // negative in water: distance to the shore (m)
 	float froude = speed / sqrt(9.81 * max(depth_field, 0.08));
@@ -149,8 +210,8 @@ void fragment() {
 	// ------------------------------------------------------------- surface normal
 	// Phase jitter must be smooth: any fine detail here turns into marbled smears once multiplied by the flow.
 	float jitter = textureLod(foam_tex, xz * 0.0035, 7.0).r * 0.8;
-	vec3 nL = flow_normal(ripple_large, xz, flow, large_scale, flow_cycle, t, jitter);
-	vec3 nS = flow_normal(ripple_small, xz, flow * 1.1, small_scale, flow_cycle * 0.7, t, jitter + 0.25);
+	vec3 nL = flow_normal_live(ripple_large, xz, flow, large_scale, flow_cycle, t, jitter, ripple_speed * 1.6);
+	vec3 nS = flow_normal_live(ripple_small, xz, flow * 1.1, small_scale, flow_cycle * 0.7, t, jitter + 0.25, ripple_speed);
 	// Wind ripples: not carried by the current, strongest on slow wide water.
 	vec2 wuv = (xz + wind * t * 1.6) / (small_scale * 0.8);
 	vec3 nW = unpack_n(texture(ripple_small, wuv + vec2(0.21, 0.73)).rgb);

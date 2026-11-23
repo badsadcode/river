@@ -42,8 +42,8 @@ public static class ProceduralTextures
                 {
                     float fx = x * period / (float)size, fy = y * period / (float)size;
                     float n = PNoise(fx, fy, period, seed + o * 97);
-                    // Mix of rounded and slightly peaked waves.
-                    sum += (n * 0.6f + (0.5f - MathF.Abs(n)) * 0.8f) * amp;
+                    // Mostly rounded waves with some peaking (strong folding read as crumpled paper).
+                    sum += (n * 0.75f + (0.5f - MathF.Abs(n)) * 0.45f) * amp;
                     norm += amp; amp *= 0.55f; period *= 2;
                 }
                 h[y * size + x] = sum / norm;

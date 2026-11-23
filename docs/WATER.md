@@ -30,7 +30,14 @@ The river's look is driven by the same data that drives the raft: the reach fiel
 6. **Edge** — alpha fades over the last ~15 cm of thickness so shorelines aren't hard cuts.
 7. **Waves** (vertex shader) — swell, chop in rough water and *standing waves* in fast water (stationary crests,
    wavelength 2πv²/g), on a 1 m mesh. Same function as the raft's buoyancy: `Core/SurfaceWaves.cs` mirrored by
-   `wave_height` in the shader, clocked by `Raft.WaveTime`. Change both together.
+   `wave_height` in the shader, clocked by `Raft.WaveTime`. Change both together. Rocks add a pillow on their
+   upstream face, water drawn down beside them and a hollow behind, scaled by the velocity head v²/2g of the current
+   approaching each rock (`Rock.FlowX/Z`; `SurfaceWaves.RockBump` ↔ shader `rock_bump`, rocks passed as a uniform
+   array of up to 64).
+9. **Living ripples and texture advection** — each ripple layer is two crossing wave trains that travel on their
+   own (`ripple_speed`) while drifting with the current, so the pattern changes shape instead of sliding like a
+   rigid sheet. Textures are carried by a current smoothed over ~3 m (`adv_smooth`) and capped (`adv_cap`):
+   the exact current curls tightly around rocks and in eddies and wound the textures into whirlpool rings.
 8. **Riverbed** (Terrain.gdshader) — matte under water (a glossy bed showed through as a green-yellow sun path);
    caustics ~1 m (`caustic_scale`).
 

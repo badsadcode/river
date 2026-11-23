@@ -8,6 +8,7 @@ public struct Rock
 {
     public float X, Z, Radius, Top;
     public int Seed;
+    public float FlowX, FlowZ;   // current approaching the rock (m/s, mean around it): drives its pillow and hollow
 }
 
 /// <summary>

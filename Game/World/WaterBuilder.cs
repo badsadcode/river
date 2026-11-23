@@ -28,6 +28,18 @@ public static class WaterBuilder
     public static Node3D Build(ReachField f, ShaderMaterial mat)
     {
         var root = new Node3D { Name = "Water" };
+        // Rocks for the shader's pillows and hollows (mirror of SurfaceWaves.RockBump), at most 64.
+        int nr = Math.Min(64, f.Rocks.Count);
+        var ra = new Vector4[64]; var rf = new Vector2[64];
+        for (int k = 0; k < nr; k++)
+        {
+            var r = f.Rocks[k];
+            ra[k] = new Vector4(r.X, r.Z, r.Radius, r.Top);
+            rf[k] = new Vector2(r.FlowX, r.FlowZ);
+        }
+        mat.SetShaderParameter("rocks", ra);
+        mat.SetShaderParameter("rock_flow", rf);
+        mat.SetShaderParameter("rock_count", nr);
         for (int cz = 0; cz < f.Nz - 1; cz += ChunkCells)
             for (int cx = 0; cx < f.Nx - 1; cx += ChunkCells)
             {

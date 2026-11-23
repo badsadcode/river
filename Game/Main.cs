@@ -220,6 +220,21 @@ public partial class Main : Node3D
             // "bar" = the gravel bar in the meanders (faster water: foam on the eddy line).
             case "eddy": WakeShot(f.Islands[Math.Min(2, f.Islands.Count - 1)], 38f, 22f, 16f); break;
             case "bar": WakeShot(f.Islands[Math.Min(4, f.Islands.Count - 1)], 26f, 8f, 30f); break;
+            case "rock":
+            {
+                // The most exposed rock in fast water, from the side and a little upstream: pillow, hollow, foam.
+                Rock best = default; float score = -1f;
+                foreach (var r in f.Rocks)
+                {
+                    float sp = MathF.Sqrt(r.FlowX * r.FlowX + r.FlowZ * r.FlowZ), s = sp * (r.Top + 0.6f) * r.Radius;
+                    if (s > score) { score = s; best = r; }
+                }
+                float spd = MathF.Max(0.01f, MathF.Sqrt(best.FlowX * best.FlowX + best.FlowZ * best.FlowZ));
+                float dx = best.FlowX / spd, dz = best.FlowZ / spd;
+                var from = W(best.X - dx * 4f - dz * 4.5f, best.Z - dz * 4f + dx * 4.5f, 3.2f);
+                FlyCam.LookAtPoint(from, W(best.X + dx * 0.8f, best.Z + dz * 0.8f, 0f));
+                break;
+            }
             case "foam_close":
             {
                 // Standing in the riffle (as if on the raft), looking down and ahead at the foam from 2.5 m.

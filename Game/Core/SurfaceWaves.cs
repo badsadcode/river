@@ -41,4 +41,38 @@ public static class SurfaceWaves
         }
         return h * shallowFade;
     }
+
+    /// <summary>
+    /// Water piling up around a rock (also mirrored in the shader: rock_bump). In the rock's frame (u along the
+    /// approaching current, v across, both in rock radii): a pillow on the upstream face, water drawn down beside it
+    /// where it speeds up, and a hollow just behind. Its scale is the velocity head v²/2g (7 cm at 1.2 m/s, 40 cm at
+    /// 2.8 m/s). A rock just under the surface makes a smooth hump with a hollow behind instead.
+    /// </summary>
+    public static float RockBump(float x, float z, in Rock r)
+    {
+        float speed = MathF.Sqrt(r.FlowX * r.FlowX + r.FlowZ * r.FlowZ);
+        if (speed < 0.05f) return 0f;
+        float dx = x - r.X, dz = z - r.Z, reach = r.Radius * 3.5f;
+        if (dx * dx + dz * dz > reach * reach) return 0f;
+        float hv = MathF.Min(speed * speed / (2f * G), 0.35f);
+        float ux = r.FlowX / speed, uz = r.FlowZ / speed;
+        float u = (dx * ux + dz * uz) / r.Radius, v = (-dx * uz + dz * ux) / r.Radius;
+        float emerg = MathUtil.Smoothstep(-0.6f, 0.0f, r.Top);          // 1: breaks the surface
+        float deep = MathUtil.Smoothstep(-1.4f, -0.6f, r.Top);          // 0: too deep to show
+        float pillow = MathF.Exp(-((u + 1.05f) * (u + 1.05f) / 0.18f + v * v / 0.55f));
+        float sides = MathF.Exp(-((u - 0.2f) * (u - 0.2f) / 0.5f + (MathF.Abs(v) - 1.15f) * (MathF.Abs(v) - 1.15f) / 0.12f));
+        float hollow = MathF.Exp(-((u - 1.5f) * (u - 1.5f) / 0.6f + v * v / 0.35f));
+        float hump = MathF.Exp(-((u + 0.2f) * (u + 0.2f) + v * v) / 0.8f);
+        return hv * deep * (emerg * (pillow - 0.35f * sides - 0.55f * hollow) + (1f - emerg) * (0.6f * hump - 0.4f * hollow));
+    }
+
+    /// <summary>Everything above the solved level at (x, z): waves plus rock bumps (what the raft floats on).</summary>
+    public static float Total(ReachField f, float x, float z, float t)
+    {
+        if (!f.InDomain(x, z)) return Height(x, z, t, 0f, 0.6f, 3f);
+        var (vx, vz) = f.SampleVelocity(x, z);
+        float h = Height(x, z, t, vx, vz, f.SampleDepth(x, z));
+        foreach (var r in f.Rocks) h += RockBump(x, z, r);
+        return h;
+    }
 }

@@ -106,13 +106,8 @@ public partial class Raft : RigidBody3D
     /// <summary>Bed height (for poling, anchoring, grounding).</summary>
     public float BedHeight(float x, float z) => Field.InDomain(x, z) ? Field.SampleHeight(x, z) : Field.EtaTrend(z) - 3f;
 
-    /// <summary>The same small waves the water mesh shows (Core/SurfaceWaves.cs): swell, chop, standing waves.</summary>
-    float SmallWaves(float x, float z, float t)
-    {
-        if (!Field.InDomain(x, z)) return SurfaceWaves.Height(x, z, t, 0f, 0.6f, 3f);
-        var (vx, vz) = Field.SampleVelocity(x, z);
-        return SurfaceWaves.Height(x, z, t, vx, vz, Field.SampleDepth(x, z));
-    }
+    /// <summary>The same surface the water mesh shows (Core/SurfaceWaves.cs): swell, chop, standing waves, rock pillows.</summary>
+    float SmallWaves(float x, float z, float t) => SurfaceWaves.Total(Field, x, z, t);
 
     // ------------------------------------------------------------------ controls
 

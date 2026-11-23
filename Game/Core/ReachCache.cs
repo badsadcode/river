@@ -28,7 +28,7 @@ public static class ReachCache
             w.Write(i.HalfWidth); w.Write(i.Roughness); w.Write(i.MaxHeight); w.Write(i.Seed);
         }
         w.Write(f.Rocks.Count);
-        foreach (var r in f.Rocks) { w.Write(r.X); w.Write(r.Z); w.Write(r.Radius); w.Write(r.Top); w.Write(r.Seed); }
+        foreach (var r in f.Rocks) { w.Write(r.X); w.Write(r.Z); w.Write(r.Radius); w.Write(r.Top); w.Write(r.Seed); w.Write(r.FlowX); w.Write(r.FlowZ); }
     }
 
     public static ReachField TryLoad(string path, string key)
@@ -56,7 +56,11 @@ public static class ReachCache
                 });
             int nr = rd.ReadInt32();
             for (int k = 0; k < nr; k++)
-                f.Rocks.Add(new Rock { X = rd.ReadSingle(), Z = rd.ReadSingle(), Radius = rd.ReadSingle(), Top = rd.ReadSingle(), Seed = rd.ReadInt32() });
+                f.Rocks.Add(new Rock
+                {
+                    X = rd.ReadSingle(), Z = rd.ReadSingle(), Radius = rd.ReadSingle(), Top = rd.ReadSingle(), Seed = rd.ReadInt32(),
+                    FlowX = rd.ReadSingle(), FlowZ = rd.ReadSingle(),
+                });
             return f;
         }
         catch (Exception) { return null; }

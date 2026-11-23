@@ -200,6 +200,20 @@ public static class ReachGenerator
         ComputeVelocity(f, connected, s, keep);
         Eddies.AddRecirculation(f, connected, lee, lines, nearestIdx, lineOf, m => Log(m));
         Log($"flow with lee zones, outflow {f.OutflowMeasured:F1} m³/s");
+        // Each rock's approaching current: the mean on a ring around it (at the rock itself the water is held back).
+        for (int k = 0; k < f.Rocks.Count; k++)
+        {
+            var r = f.Rocks[k];
+            float ringX = 0f, ringZ = 0f;
+            for (int a = 0; a < 12; a++)
+            {
+                float ang = a * MathF.PI / 6f, rr = r.Radius * 2.5f + 2f;
+                var (vx, vz) = f.SampleVelocity(r.X + MathF.Cos(ang) * rr, r.Z + MathF.Sin(ang) * rr);
+                ringX += vx; ringZ += vz;
+            }
+            r.FlowX = ringX / 12f; r.FlowZ = ringZ / 12f;
+            f.Rocks[k] = r;
+        }
 
         // Surface trend along the valley (for far terrain and the bits of water outside the grid).
         double sz = 0, se = 0, szz = 0, sze = 0; int cnt = 0;
