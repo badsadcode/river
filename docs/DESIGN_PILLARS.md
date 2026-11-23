@@ -1,6 +1,6 @@
 # RIVER — Design Pillars
 
-*Bad Ideas Works · v0.1 · 2026-11-23*
+*Bad Ideas Works · v0.2 · 2026-11-23 · with notes from Noor*
 *Engine: Godot 4.7.2 · C# · Forward+*
 
 > One raft. One river. It does not end.
@@ -72,6 +72,18 @@ and time, the world gets stranger and the player more fragile. Composure is a re
 ### P6 — The naturalist's journal
 You are recording, not conquering. Sketch species, press plants, log fish, chart the river. The journal is the
 progression system, the map and the souvenir of your run.
+
+### P7 — A tiny, warm, human place *(Noor)*
+The player should be **emotionally attached** to the raft, not just mechanically dependent on it. Small daily
+rituals (opening the canvas flap to the mist, putting water on the stove, rearranging specimens, fixing a loose
+plank) and keepsakes brought back from the shore slowly turn it into a cluttered floating museum of the journey.
+**The contrast between the familiar raft and the unfamiliar world is the atmosphere.**
+
+### P8 — Places worth staying *(Noor: the Secret Garden feeling)*
+Not every discovery is a ruin, a threat or a clue. Sometimes you push through an overgrown archway into somewhere
+breathtaking: a pool beneath a waterfall, a valley of flowers, a forgotten orchard, a clearing full of deer.
+**No reward notification. No quest.** Just somewhere you want to stay a while. The journey is infinite, but the
+best moments might be the ones when you decide not to go anywhere.
 
 ---
 
@@ -170,6 +182,21 @@ across it. These drive flow, sandbars, fish habitat, the map and the journal.
 - **Damage:** hull logs, lashings, leaks. Repairs need materials from the shore.
 - **Walking on deck while moving** is a hard requirement: the player character is simulated in the raft's frame.
 
+### 6.1 Domestic life (P7)
+- **Rituals, not chores.** Small optional interactions with no or tiny mechanical value: open the flap, boil the
+  kettle, wind the pocket watch, tap the barometer, hang washing, light the lantern at dusk, sweep the deck, tie
+  down loose things before a storm. Doing them restores a little composure. Skipping them never punishes you.
+- **The raft wears your life.** Clutter accumulates naturally: drying fish, muddy boots by the door, open journal
+  on the table, a mug left on the rail. Wear and patches show its history.
+- **Keepsakes.** Anything beautiful found ashore can be brought back and **placed freely** on the raft: a carved
+  figure, a painting from a deserted house, a potted plant (which keeps growing, and needs watering), a skull,
+  a music box, a stuffed bird. Shelves, hooks, walls and deck space are yours to arrange. No stat bonuses by
+  default; their value is that you remember where each one came from (the journal does too).
+- **Warm vs. wild.** Lighting, sound and colour inside the cabin are deliberately warm and close: lantern glow,
+  stove crackle, rain on canvas. Step outside and the scale of the wilderness hits again.
+- **Engineering note:** keepsakes are physical objects with transforms saved in raft space; they must survive
+  rough water (secured vs. loose items that can slide, fall or go overboard: a small heartbreak, used sparingly).
+
 ---
 
 ## 7. The land
@@ -178,6 +205,19 @@ across it. These drive flow, sandbars, fish habitat, the map and the journal.
   horizon scenery beyond. Large enough to wander, hunt and get lost in, with natural boundaries.
 - **On shore:** foraging, hunting, gathering wood and fibre, campsites, ruins, abandoned outposts, river
   settlements, trading posts, the occasional overgrown walled garden.
+
+### 7.1 Secret places (P8)
+- A dedicated **site type** in world generation: compositions of terrain, water, vegetation, light and wildlife
+  tuned for beauty (waterfall pool, flower valley, forgotten orchard, deer clearing, fern grotto, still oxbow at
+  dawn, hot spring in snow, ancient tree…). Deliberately **hidden**: behind an overgrown arch, up a side stream,
+  over a ridge.
+- **Silence is the reward.** No popup, no XP, no quest marker, no map icon unless the player chooses to draw it
+  in the journal. Music may arrive gently, or not at all.
+- **Staying is supported.** You can camp, moor nearby, sit, sketch, fish. Time passes beautifully (light,
+  animals, weather change). Nothing in the game ever forces you to leave except seasons and your own supplies.
+- **Design rule:** no system (sponsor deadlines, timers, threats) may pressure the player into constant movement.
+  The river is endless; there's no hurry.
+- **Rarity matters.** Too frequent and they become content. They should feel like luck.
 
 ---
 
@@ -243,8 +283,8 @@ No survival, no UI. Just the river.
 
 **Success test:** Tom drifts for 15 minutes with no goal and doesn't want to stop.
 
-Then: rapids & a waterfall portage → island labyrinth → fishing → raft building → survival → journal →
-expedition layer.
+Then: rapids & a waterfall portage → island labyrinth → fishing → raft building & domestic life (cabin, stove,
+first keepsake shelf) → first secret place → survival → journal → expedition layer.
 
 ---
 
