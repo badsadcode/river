@@ -1,0 +1,126 @@
+using System;
+using System.Collections.Generic;
+using Godot;
+using River.Core;
+using Noise = River.Core.Noise;
+
+namespace River.World;
+
+/// <summary>
+/// Water surface meshes: the grid's water (plus a margin tucked under the banks) at the solved surface height,
+/// and simple strips where the river continues beyond the grid. One shared river material.
+/// </summary>
+public static class WaterBuilder
+{
+    const int ChunkCells = 64;
+
+    public static ShaderMaterial CreateMaterial(FieldTextures tex)
+    {
+        var mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://Game/Shaders/River.gdshader") };
+        tex.Apply(mat);
+        mat.SetShaderParameter("ripple_large", ProceduralTextures.WaterNormals(512, 11, 4, 9f));
+        mat.SetShaderParameter("ripple_small", ProceduralTextures.WaterNormals(512, 23, 8, 14f));
+        mat.SetShaderParameter("foam_tex", ProceduralTextures.Foam(512, 37));
+        mat.RenderPriority = 1;
+        return mat;
+    }
+
+    public static Node3D Build(ReachField f, ShaderMaterial mat)
+    {
+        var root = new Node3D { Name = "Water" };
+        for (int cz = 0; cz < f.Nz - 1; cz += ChunkCells)
+            for (int cx = 0; cx < f.Nx - 1; cx += ChunkCells)
+            {
+                var mesh = ChunkMesh(f, cx, cz, Math.Min(ChunkCells, f.Nx - 1 - cx), Math.Min(ChunkCells, f.Nz - 1 - cz));
+                if (mesh == null) continue;
+                root.AddChild(new MeshInstance3D
+                {
+                    Name = $"W{cx}_{cz}", Mesh = mesh, MaterialOverride = mat,
+                    CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+                });
+            }
+        root.AddChild(FarStrips(f, mat));
+        return root;
+    }
+
+    static bool WetEnough(ReachField f, int i) => f.Water[i] || f.ShoreDist[i] < 5f;
+
+    static ArrayMesh ChunkMesh(ReachField f, int cx, int cz, int w, int h)
+    {
+        var verts = new List<Vector3>();
+        var map = new Dictionary<int, int>();
+        var idx = new List<int>();
+        int V(int gx, int gz)
+        {
+            int i = gz * f.Nx + gx;
+            if (map.TryGetValue(i, out int v)) return v;
+            v = verts.Count;
+            verts.Add(new Vector3(gx * f.Cell, f.Eta[i], gz * f.Cell));
+            map[i] = v;
+            return v;
+        }
+        for (int z = cz; z < cz + h; z++)
+            for (int x = cx; x < cx + w; x++)
+            {
+                int i00 = z * f.Nx + x;
+                if (!(WetEnough(f, i00) || WetEnough(f, i00 + 1) || WetEnough(f, i00 + f.Nx) || WetEnough(f, i00 + f.Nx + 1))) continue;
+                int a = V(x, z), b = V(x + 1, z), c = V(x, z + 1), d = V(x + 1, z + 1);
+                idx.Add(a); idx.Add(b); idx.Add(d); idx.Add(a); idx.Add(d); idx.Add(c);
+            }
+        if (idx.Count == 0) return null;
+        var norms = new Vector3[verts.Count];
+        Array.Fill(norms, Vector3.Up);
+        var arrays = new Godot.Collections.Array();
+        arrays.Resize((int)Mesh.ArrayType.Max);
+        arrays[(int)Mesh.ArrayType.Vertex] = verts.ToArray();
+        arrays[(int)Mesh.ArrayType.Normal] = norms;
+        arrays[(int)Mesh.ArrayType.Index] = idx.ToArray();
+        var mesh = new ArrayMesh();
+        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+        return mesh;
+    }
+
+    /// <summary>Flat water following the far trench (TerrainBuilder.FarHeight) up- and downstream of the grid.</summary>
+    static MeshInstance3D FarStrips(ReachField f, ShaderMaterial mat)
+    {
+        const float step = 16f, reach = 5000f;
+        var verts = new List<Vector3>();
+        var idx = new List<int>();
+        void Strip(float zStart, float zEnd)
+        {
+            int n = (int)(MathF.Abs(zEnd - zStart) / step);
+            int baseV = verts.Count;
+            int k = zStart < 0.5f * f.SizeZ ? 0 : f.Main.Count - 1;
+            for (int s = 0; s <= n; s++)
+            {
+                float z = zStart + MathF.Sign(zEnd - zStart) * s * step;
+                float far = MathF.Abs(z < 0 ? z : z - f.SizeZ);
+                float wander = 60f * Noise.Fbm1(z / 500f, f.Seed + 401, 2) * MathUtil.Smoothstep(0f, 400f, far);
+                float cx = f.Main.X[k] + wander;
+                // Near the grid edge use the grid's own surface so the join is invisible.
+                float eta = MathUtil.Lerp(f.SampleEta(f.Main.X[k], Math.Clamp(z, 0, f.SizeZ)), f.EtaTrend(z), MathUtil.Smoothstep(0f, 300f, far));
+                verts.Add(new Vector3(cx - 30f, eta, z));
+                verts.Add(new Vector3(cx + 30f, eta, z));
+            }
+            for (int s = 0; s < n; s++)
+            {
+                int a = baseV + s * 2, b = a + 1, c = a + 2, d = a + 3;
+                // Either direction: emit both windings' worth by ordering on z direction.
+                if (zEnd > zStart) { idx.Add(a); idx.Add(b); idx.Add(d); idx.Add(a); idx.Add(d); idx.Add(c); }
+                else { idx.Add(a); idx.Add(d); idx.Add(b); idx.Add(a); idx.Add(c); idx.Add(d); }
+            }
+        }
+        Strip(-2f, -reach);
+        Strip(f.SizeZ + 2f, f.SizeZ + reach);
+        var norms = new Vector3[verts.Count];
+        Array.Fill(norms, Vector3.Up);
+        var arrays = new Godot.Collections.Array();
+        arrays.Resize((int)Mesh.ArrayType.Max);
+        arrays[(int)Mesh.ArrayType.Vertex] = verts.ToArray();
+        arrays[(int)Mesh.ArrayType.Normal] = norms;
+        arrays[(int)Mesh.ArrayType.Index] = idx.ToArray();
+        var mesh = new ArrayMesh();
+        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+        return new MeshInstance3D { Name = "FarWater", Mesh = mesh, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+    }
+}
