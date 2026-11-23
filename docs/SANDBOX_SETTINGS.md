@@ -4,7 +4,8 @@
 
 **Status:** loader implemented (`Game/Core/SandboxSettings.cs`, tested in `Tests/Core.Tests`). The game reads
 `%APPDATA%\Godot\app_userdata\River\game_sandbox_settings.json` (written with the Explorer preset on first launch).
-In use so far: `Seed`, `River.CurrentStrength` (scales the river's discharge). The rest is stored and validated,
+In use so far: `Seed`, `River.CurrentStrength` (scales the river's discharge), `Time.DayLengthMinutes`,
+`Time.SeasonLengthDays`, `Time.StartingSeason` (day/night cycle and the sun's seasonal path). The rest is stored and validated,
 waiting for the systems that use it.
 
 Every new journey is created from a **sandbox settings** file. Instead of us deciding one "correct" scale,

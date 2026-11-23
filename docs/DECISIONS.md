@@ -50,3 +50,12 @@ the coarser surface, and the 2 m grid needs only two CG solves. ~35 % faster tha
 reference: current within 0.025 m/s rms, surface within 9 cm rms (`Tests/Core.Tests -- --reference`).
 Plain Jacobi-CG still needs ~5000 iterations on the fine grid; a better preconditioner (multigrid-preconditioned
 CG) is the next step if generation time matters again.
+
+## D10 — Day/night cycle keyed on the sun's elevation
+A game clock (sandbox `Time.*`) drives a simple solar model (declination + hour angle, latitude 52°N for now) for
+the sun and a near-full moon. Every lighting value (sun colour/energy, sky colours, exposure, fog, river mist) is a
+smooth curve over the sun's *elevation* rather than the clock, so a dawn looks like a dawn in every season and at
+every latitude, and the journey south can later lower the latitude without retuning. Mist is thick from late night
+through sunrise and burns off by mid-morning; a thinner veil returns in the evening. At night the one shadowed
+directional light becomes moonlight; stars are an equirectangular texture in the procedural sky's cover slot.
+Lights in the `night_lights` group (the raft lantern) fade in at dusk. Logic and tests: `Game/Core/DayCycle.cs`.

@@ -14,13 +14,16 @@
 * **Water shader** (`Game/Shaders/River.gdshader`): see `docs/WATER.md`.
 * **Raft** (`Game/Raft/`): 3.8 t log raft with tent, crates, lantern, sweep oar. Per-point buoyancy and current
   drag; oar, pole, anchor. Drift test: follows the current through bends unsteered, never grounds, ≤1° tilt.
+* **Day/night** (`Game/Core/DayCycle.cs`, `Game/World/EnvironmentRig.cs`): game clock, sun and moon paths by
+  season, lighting/mist curves, stars, lantern at dusk. T jumps ahead, Y overcast, [ ] time speed.
+* **Sandbox settings** (`Game/Core/SandboxSettings.cs`): loads/validates `game_sandbox_settings.json`.
 * **Player** (`Game/Player/PlayerController.cs`): walks on the moving raft, steps ashore, swims, climbs back on,
   takes the oar (E), poles (Q), anchors (G), chase camera (V).
 
 ## Known gaps / next steps (in rough priority)
 1. **Eddies and recirculation** behind islands, points and rocks (the potential flow has no inertia): add a
    vortex/eddy layer to the current field (affects raft, foam and ripples).
-2. **Generation time** ~35 s in game (CG solve ×3): coarse-grid warm start or multigrid → a few seconds.
+2. **Generation time**: multilevel solve brought it down ~35 % (D9); multigrid-preconditioned CG would cut it further.
 3. **Endless streaming**: the reach is one fixed grid. Next: segments generated ahead along the river, floating origin.
 4. **Rapids & a waterfall with portage**, island labyrinth segment type.
 5. Water: wakes around the raft and the oar blade, splash particles at rocks, underwater view when swimming,

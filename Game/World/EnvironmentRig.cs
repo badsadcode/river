@@ -5,33 +5,54 @@ using River.Core;
 namespace River.World;
 
 /// <summary>
-/// Sky, sun, fog and river mist, with a few time-of-day presets (T cycles them in game).
+/// Sky, sun/moon, fog, river mist and stars, driven by the game clock (day/night cycle).
+/// The sun follows a real path for the latitude and season (Core/DayCycle.cs); colours, fog and mist follow the
+/// sun's elevation, so mornings start misty and the mist burns off. Lanterns (group "night_lights") come on at dusk.
 /// Mood target: soft diffuse light, morning mist on the water (docs/DESIGN_PILLARS.md §11).
 /// </summary>
 public partial class EnvironmentRig : Node3D
 {
-    public DirectionalLight3D Sun;
+    public DirectionalLight3D Sun;          // the sun by day, the moon by night
     public WorldEnvironment WorldEnv;
     public FogVolume Mist;
+    public GameClock Clock;
+    public float Latitude = 52f;            // degrees north; later: falls as the journey heads for the tropics
+    public float Overcast;                  // 0 clear … 1 grey
+    public float SunElevation { get; private set; }
+    public Daylight.State Light { get; private set; }
+
+    public ShaderMaterial Water;            // the river material (night roughness)
     ShaderMaterial _mistMat;
     ProceduralSkyMaterial _sky;
+    float _skyTimer;
+
+    // Jump-to times for T (and for screenshots: "shot@N").
+    // Hours are for the equinox at 52°N (sunrise ≈ 06:05, sunset ≈ 18:10): just after sunrise, mid-morning, noon,
+    // low evening sun, overcast late morning, midnight.
+    public static readonly string[] PresetNames = { "dawn mist", "morning", "noon", "golden evening", "overcast", "night" };
+    static readonly float[] PresetHours = { 6.4f, 8.5f, 12.5f, 17.4f, 11f, 23.5f };
     int _preset;
+    static readonly float[] TimeScales = { 1f, 10f, 60f, 360f };
+    int _timeScale;
 
-    public static readonly string[] PresetNames = { "dawn mist", "morning", "noon", "golden evening", "overcast" };
-    public string PresetName => PresetNames[_preset];
+    public string PresetName => TimeLabel;
+    public string TimeLabel => $"day {Clock.Day} · {Clock.Season} · {Clock.Clock}{(Overcast > 0.5f ? " · overcast" : "")}{(Clock.TimeScale > 1f ? $" · ×{Clock.TimeScale:0}" : "")}";
 
-    public void Setup(ReachField f, FieldTextures tex)
+    public void Setup(ReachField f, FieldTextures tex, SandboxSettings sandbox)
     {
-        // Procedural sky (art-directable per preset; a physical sky looked flat grey under AgX).
+        var t = sandbox?.Time ?? new SandboxSettings.TimeGroup();
+        Clock = new GameClock(t.DayLengthMinutes, t.SeasonLengthDays, t.StartingSeason, PresetHours[0]);
+
+        // Procedural sky: art-directable colours; stars painted in as the "sky cover" texture, faded in at night.
         _sky = new ProceduralSkyMaterial
         {
             SunAngleMax = 22f, SunCurve = 0.12f, GroundBottomColor = new Color(0.16f, 0.17f, 0.13f),
-            GroundHorizonColor = new Color(0.62f, 0.64f, 0.6f), UseDebanding = true,
+            UseDebanding = true, SkyCover = StarTexture(2048, 1024, f.Seed), SkyCoverModulate = new Color(1, 1, 1, 0),
         };
         var env = new Godot.Environment
         {
             BackgroundMode = Godot.Environment.BGMode.Sky,
-            Sky = new Sky { SkyMaterial = _sky, ProcessMode = Sky.ProcessModeEnum.Automatic, RadianceSize = Sky.RadianceSizeEnum.Size256 },
+            Sky = new Sky { SkyMaterial = _sky, ProcessMode = Sky.ProcessModeEnum.Incremental, RadianceSize = Sky.RadianceSizeEnum.Size256 },
             AmbientLightSource = Godot.Environment.AmbientSource.Sky,
             ReflectedLightSource = Godot.Environment.ReflectionSource.Sky,
             AmbientLightSkyContribution = 1f,
@@ -75,48 +96,103 @@ public partial class EnvironmentRig : Node3D
         };
         AddChild(Mist);
 
-        ApplyPreset(0);
+        UpdateLighting(true);
     }
 
+    // ------------------------------------------------------------------ controls
+
+    /// <summary>T: jump forward to the next notable time of day.</summary>
     public void NextPreset() => ApplyPreset((_preset + 1) % PresetNames.Length);
 
     public void ApplyPreset(int p)
     {
         _preset = p;
+        Overcast = p == 4 ? 1f : 0f;
+        Clock.SetHour(PresetHours[p]);
+        UpdateLighting(true);
+    }
+
+    public void ToggleOvercast() { Overcast = Overcast > 0.5f ? 0f : 1f; UpdateLighting(true); }
+
+    public void ChangeTimeScale(int dir)
+    {
+        _timeScale = Math.Clamp(_timeScale + dir, 0, TimeScales.Length - 1);
+        Clock.TimeScale = TimeScales[_timeScale];
+    }
+
+    // ------------------------------------------------------------------ per frame
+
+    public override void _Process(double delta)
+    {
+        if (Clock == null) return;
+        Clock.Advance(delta);
+        _skyTimer -= (float)delta;
+        UpdateLighting(_skyTimer <= 0f);
+    }
+
+    void UpdateLighting(bool updateSky)
+    {
+        float hour = Clock.Hour, doy = Clock.DayOfYear;
+        var sun = Solar.SunDirection(Latitude, doy, hour);
+        var moon = Solar.MoonDirection(Latitude, doy, hour);
+        SunElevation = Solar.ElevationDeg(sun.up);
+        var st = Daylight.Evaluate(SunElevation, Solar.ElevationDeg(moon.up), hour < 12f, Overcast);
+        Light = st;
+
+        // Godot: east = +x, north = −z. The light points from the body towards the ground.
+        var d = st.UseMoon ? moon : sun;
+        var toBody = new Vector3(d.east, MathF.Max(d.up, 0.02f), -d.north).Normalized();
+        Sun.LookAtFromPosition(Vector3.Zero, -toBody, MathF.Abs(toBody.Y) > 0.99f ? Vector3.Forward : Vector3.Up);
+        Sun.LightColor = st.UseMoon ? new Color(0.62f, 0.72f, 1f) : C(st.SunColor);
+        Sun.LightEnergy = st.UseMoon ? st.MoonEnergy : st.SunEnergy;
+        Sun.Visible = Sun.LightEnergy > 0.001f;
+
         var env = WorldEnv.Environment;
-        // elevation°, azimuth° (from north, clockwise), colour, energy, mist, fog, sky turbidity
-        (float el, float az, Color col, float energy, float mist, float fog, float turb, float exposure) s = p switch
+        env.TonemapExposure = st.Exposure;
+        env.VolumetricFogDensity = st.FogDensity;
+        env.VolumetricFogAlbedo = C(st.FogAlbedo);
+        _mistMat.SetShaderParameter("density", st.Mist);
+        _mistMat.SetShaderParameter("albedo", Color.FromHsv(0.6f, 0.05f, Mathf.Lerp(0.95f, 0.45f, st.Night)));
+        Mist.Visible = st.Mist > 0.001f;
+
+        // At night the water's glints are moonlight on wet ripples: soften them so they don't bloom into blobs.
+        Water?.SetShaderParameter("roughness_boost", 0.07f * st.Night);
+
+        // Lanterns: on from dusk to dawn.
+        float lamp = 1f - Mathf.SmoothStep(1f, 7f, SunElevation);
+        foreach (var n in GetTree().GetNodesInGroup("night_lights"))
+            if (n is Light3D l) { float max = (float)l.GetMeta("max_energy", 1f); l.LightEnergy = max * lamp; l.Visible = lamp > 0.01f; }
+
+        if (!updateSky) return;
+        _skyTimer = 0.2f;   // sky radiance is re-rendered incrementally; don't poke it every frame
+        _sky.SkyTopColor = C(st.SkyTop);
+        _sky.SkyHorizonColor = C(st.SkyHorizon);
+        _sky.GroundHorizonColor = C(st.SkyHorizon) * 0.8f;
+        _sky.SkyEnergyMultiplier = st.SkyEnergy;
+        _sky.SunAngleMax = Mathf.Lerp(22f, 60f, Overcast);
+        _sky.SkyCoverModulate = new Color(1, 1, 1, st.Night * (1f - Overcast) * 0.9f);
+    }
+
+    static Color C(Rgb c) => new(c.R, c.G, c.B);
+
+    /// <summary>Equirectangular star field: uniform over the sphere, a few bright ones, faint Milky Way band.</summary>
+    static ImageTexture StarTexture(int w, int h, int seed)
+    {
+        var img = Image.CreateEmpty(w, h, false, Image.Format.Rgb8);
+        var rng = new Rng(seed + 777);
+        for (int i = 0; i < 9000; i++)
         {
-            0 => (9f, 100f, new Color(1f, 0.76f, 0.55f), 1.6f, 0.07f, 0.0012f, 10f, 1.1f),
-            1 => (24f, 120f, new Color(1f, 0.9f, 0.78f), 2.3f, 0.025f, 0.0006f, 6f, 1.0f),
-            2 => (58f, 170f, new Color(1f, 0.98f, 0.94f), 2.8f, 0.0f, 0.0003f, 4f, 0.9f),
-            3 => (8f, 265f, new Color(1f, 0.62f, 0.38f), 1.6f, 0.02f, 0.0008f, 8f, 1.1f),
-            _ => (40f, 200f, new Color(0.85f, 0.88f, 0.92f), 0.55f, 0.03f, 0.0018f, 20f, 1.25f),
-        };
-        float el = Mathf.DegToRad(s.el), az = Mathf.DegToRad(s.az);
-        // Direction the light travels: from the sun towards the ground. North = −z, east = +x.
-        var toSun = new Vector3(MathF.Sin(az) * MathF.Cos(el), MathF.Sin(el), -MathF.Cos(az) * MathF.Cos(el));
-        Sun.LookAtFromPosition(Vector3.Zero, -toSun, MathF.Abs(toSun.Y) > 0.99f ? Vector3.Forward : Vector3.Up);
-        Sun.LightColor = s.col;
-        Sun.LightEnergy = s.energy;
-        // Sky colours per preset: zenith, horizon.
-        (Color top, Color hor) sky = p switch
-        {
-            0 => (new Color(0.36f, 0.45f, 0.62f), new Color(0.93f, 0.78f, 0.62f)),
-            1 => (new Color(0.30f, 0.48f, 0.76f), new Color(0.76f, 0.80f, 0.84f)),
-            2 => (new Color(0.24f, 0.44f, 0.78f), new Color(0.70f, 0.78f, 0.86f)),
-            3 => (new Color(0.30f, 0.36f, 0.58f), new Color(0.98f, 0.66f, 0.42f)),
-            _ => (new Color(0.52f, 0.56f, 0.60f), new Color(0.70f, 0.72f, 0.73f)),
-        };
-        _sky.SkyTopColor = sky.top;
-        _sky.SkyHorizonColor = sky.hor;
-        _sky.GroundHorizonColor = sky.hor * 0.8f;
-        _sky.SkyEnergyMultiplier = p == 4 ? 0.8f : 1.0f;
-        _sky.SunAngleMax = p == 4 ? 60f : 22f;
-        env.VolumetricFogDensity = s.fog;
-        env.VolumetricFogAlbedo = p == 4 ? new Color(0.8f, 0.82f, 0.85f) : new Color(0.92f, 0.9f, 0.88f);
-        env.TonemapExposure = s.exposure;
-        _mistMat.SetShaderParameter("density", s.mist);
-        Mist.Visible = s.mist > 0f;
+            float u = rng.Next01(), v = MathF.Acos(1f - 2f * rng.Next01()) / MathF.PI;   // uniform on the sphere
+            // Denser along a tilted band (the Milky Way).
+            float band = MathF.Abs(MathF.Sin((u * MathF.Tau) + 0.6f) * 0.35f + (v - 0.5f));
+            if (band > 0.08f && rng.Next01() < 0.45f) continue;
+            int x = (int)(u * w) % w, y = Math.Clamp((int)(v * h), 0, h - 1);
+            float b = MathF.Pow(rng.Next01(), 6f) * 0.9f + 0.1f;
+            float tint = rng.Range(-0.08f, 0.08f);
+            var col = new Color(b * (1f + tint), b, b * (1f - tint));
+            img.SetPixel(x, y, col);
+            if (b > 0.75f) { img.SetPixel((x + 1) % w, y, col * 0.4f); img.SetPixel(x, Math.Min(h - 1, y + 1), col * 0.4f); }
+        }
+        return ImageTexture.CreateFromImage(img);
     }
 }

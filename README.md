@@ -16,4 +16,4 @@ Godot 4.7.2 · C# · Forward+ · by Bad Ideas Works.
 ## Controls
 WASD walk · Shift run · Space jump / climb out of the water · **E** take/release the sweep oar (A/D steer, W/S scull)
 · hold **Q** to pole off the bottom (shallow water) · **G** anchor · **V** chase camera (mouse orbit, wheel zoom)
-· **T** time of day · **F1** fly camera · **F3** info · **H** hide help · Esc release the mouse
+· **T** jump to the next time of day · **Y** overcast · **[ ]** slower/faster time · **F1** fly camera · **F3** info · **H** hide help · Esc release the mouse

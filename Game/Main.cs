@@ -99,9 +99,10 @@ public partial class Main : Node3D
         Textures = new FieldTextures(f);
         Env = new EnvironmentRig { Name = "Environment" };
         AddChild(Env);
-        Env.Setup(f, Textures);
+        Env.Setup(f, Textures, Sandbox);
         AddChild(TerrainBuilder.Build(f, Textures));
         WaterMaterial = WaterBuilder.CreateMaterial(Textures);
+        Env.Water = WaterMaterial;
         AddChild(WaterBuilder.Build(f, WaterMaterial));
         AddChild(Vegetation.Build(f));
 

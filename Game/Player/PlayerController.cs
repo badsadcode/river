@@ -8,7 +8,8 @@ namespace River.Player;
 /// child of the raft while standing on its deck), steps off onto land, swims if they fall in.
 ///
 /// Controls: WASD move, Shift run, Space jump/climb out, E take/release the sweep oar (then A/D steer,
-/// W/S scull), hold Q to pole off the bottom, G anchor, V chase camera, T time of day, F1 fly camera.
+/// W/S scull), hold Q to pole off the bottom, G anchor, V chase camera, T jump to the next time of day,
+/// Y overcast, [ ] slower/faster time, F1 fly camera.
 /// </summary>
 public partial class PlayerController : CharacterBody3D
 {
@@ -64,6 +65,9 @@ public partial class PlayerController : CharacterBody3D
             {
                 case Key.Escape: Input.MouseMode = Input.MouseMode == Input.MouseModeEnum.Captured ? Input.MouseModeEnum.Visible : Input.MouseModeEnum.Captured; break;
                 case Key.T: Main.Instance.Env.NextPreset(); break;
+                case Key.Y: Main.Instance.Env.ToggleOvercast(); break;
+                case Key.Bracketleft: Main.Instance.Env.ChangeTimeScale(-1); break;
+                case Key.Bracketright: Main.Instance.Env.ChangeTimeScale(1); break;
                 case Key.F1: Main.Instance.UseFlyCam(!Main.Instance.FlyCam.Active); if (Main.Instance.FlyCam.Active) Main.Instance.FlyCam.LookAtPoint(_cam.GlobalPosition, _cam.GlobalPosition - _cam.GlobalBasis.Z); break;
             }
         }

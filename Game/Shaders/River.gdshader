@@ -40,6 +40,7 @@ uniform float refraction_strength = 0.035;
 uniform int ssr_steps = 40;
 uniform float ssr_strength = 1.0;
 uniform float time_offset = 0.0;
+uniform float roughness_boost = 0.0;  // set by the day cycle (softer glints at night)
 
 varying vec3 v_world;
 
@@ -206,7 +207,7 @@ void fragment() {
 	SPECULAR = mix(0.35 * (1.0 - ssr_mask), 0.1, foam);
 	// Far away, ripples smaller than a pixel widen the sun's reflection into a glittering path.
 	float far_rough = smoothstep(15.0, 450.0, dist) * 0.1;
-	ROUGHNESS = mix(mix(0.025, 0.09, rough_water) + far_rough, 0.65, foam);
+	ROUGHNESS = mix(mix(0.025, 0.09, rough_water) + far_rough + roughness_boost, 0.65, foam);
 	METALLIC = 0.0;
 	// Fade the last centimetres into the bank so the shoreline isn't a hard cut.
 	ALPHA = clamp(thickness * 6.0, 0.0, 1.0);

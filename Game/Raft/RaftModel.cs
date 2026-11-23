@@ -123,11 +123,14 @@ public static class RaftModel
         });
         var glass = new StandardMaterial3D { AlbedoColor = new Color(1f, 0.85f, 0.6f), EmissionEnabled = true, Emission = new Color(1f, 0.7f, 0.35f), EmissionEnergyMultiplier = 2.5f };
         visual.AddChild(new MeshInstance3D { Mesh = new BoxMesh { Size = new Vector3(0.16f, 0.22f, 0.16f) }, MaterialOverride = glass, Position = post + new Vector3(0, 1.5f, 0) });
-        visual.AddChild(new OmniLight3D
+        var lantern = new OmniLight3D
         {
-            Name = "Lantern", LightColor = new Color(1f, 0.72f, 0.42f), LightEnergy = 0.8f, OmniRange = 7f,
-            Position = post + new Vector3(0, 1.5f, 0), ShadowEnabled = false,
-        });
+            Name = "Lantern", LightColor = new Color(1f, 0.72f, 0.42f), LightEnergy = 0f, OmniRange = 9f,
+            Position = post + new Vector3(0, 1.5f, 0), ShadowEnabled = true, OmniAttenuation = 1.4f,
+        };
+        lantern.SetMeta("max_energy", 1.3f);
+        lantern.AddToGroup("night_lights");   // EnvironmentRig turns it on at dusk
+        visual.AddChild(lantern);
 
         // Sweep oar: a crutch post at the stern, the oar pivoting on it and trailing behind into the water.
         var crutch = new Vector3(0, Raft.DeckTop, L * 0.5f - 0.2f);

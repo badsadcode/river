@@ -33,6 +33,42 @@ Console.WriteLine("Sandbox settings:");
     var lenient = SandboxSettings.Parse("{ // comment\n \"Seed\": 42, \"Time\": { \"DayLengthMinutes\": \"90\", }, }", w);
     Check(lenient.Seed == 42 && lenient.Time.DayLengthMinutes == 90f && w.Count == 0, "comments, trailing commas and quoted numbers are accepted");
 }
+// ---------------------------------------------------------------- day cycle (fast)
+Console.WriteLine("Day cycle:");
+{
+    float lat = 52f;
+    float Elev(float doy, float h) => Solar.ElevationDeg(Solar.SunDirection(lat, doy, h).up);
+    float sunrise = -1f;
+    for (float h = 3f; h < 9f; h += 0.01f) if (Elev(79f, h) >= 0f) { sunrise = h; break; }
+    Check(sunrise > 5.6f && sunrise < 6.4f, $"equinox sunrise near 06:00 at 52°N ({sunrise:F2} h)");
+    Check(MathF.Abs(Elev(79f, 12f) - 38f) < 1.5f, $"equinox noon elevation ≈ 38° ({Elev(79f, 12f):F1}°)");
+    Check(MathF.Abs(Elev(172f, 12f) - 61.4f) < 1.5f && MathF.Abs(Elev(355f, 12f) - 14.6f) < 1.5f,
+          $"summer/winter noon elevations ≈ 61°/15° ({Elev(172f, 12f):F1}°/{Elev(355f, 12f):F1}°)");
+    var noon = Solar.SunDirection(lat, 79f, 12f); var aft = Solar.SunDirection(lat, 79f, 16f);
+    Check(noon.north < 0f && aft.east < 0f, "the sun is south at noon and west in the afternoon");
+
+    var clock = new GameClock(60f, 20, "spring", 6f);
+    clock.Advance(3600.0);
+    Check(clock.Day == 2 && MathF.Abs(clock.Hour - 6f) < 0.01f, $"one real hour = one day at DayLengthMinutes 60 (day {clock.Day} {clock.Clock})");
+    clock.TotalDays = 20.5;
+    Check(clock.Season == "summer" && clock.DayOfSeason == 1, $"day 21 is the first day of summer ({clock.Season} {clock.DayOfSeason})");
+    clock.SetHour(5f);
+    Check(clock.Day == 22 && MathF.Abs(clock.Hour - 5f) < 0.01f, "setting the hour only moves time forward");
+
+    float worst = 0f; var prev = Daylight.Evaluate(-20f, 30f, true, 0f);
+    for (float e = -20f; e <= 90f; e += 0.1f)
+    {
+        var st = Daylight.Evaluate(e, 30f, true, 0f);
+        worst = MathF.Max(worst, MathF.Abs(st.SunEnergy - prev.SunEnergy));
+        worst = MathF.Max(worst, MathF.Abs(st.SkyHorizon.R - prev.SkyHorizon.R));
+        worst = MathF.Max(worst, MathF.Abs(st.Exposure - prev.Exposure));
+        worst = MathF.Max(worst, MathF.Abs(st.MoonEnergy - prev.MoonEnergy) * 5f);
+        prev = st;
+    }
+    Check(worst < 0.08f, $"lighting changes smoothly with the sun (largest step {worst:F3} per 0.1°)");
+    Check(Daylight.Evaluate(1f, 0f, true, 0f).Mist > 3f * Daylight.Evaluate(40f, 0f, false, 0f).Mist + 0.01f, "mist is thick at sunrise and gone by midday");
+}
+
 if (Array.IndexOf(args, "--sandbox-only") >= 0) { Console.WriteLine(failures == 0 ? "ALL PASS" : $"{failures} FAILED"); return failures == 0 ? 0 : 1; }
 
 var settings = new ReachSettings();
