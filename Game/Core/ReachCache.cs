@@ -30,6 +30,10 @@ public static class ReachCache
         }
         w.Write(f.Rocks.Count);
         foreach (var r in f.Rocks) { w.Write(r.X); w.Write(r.Z); w.Write(r.Radius); w.Write(r.Top); w.Write(r.Seed); w.Write(r.FlowX); w.Write(r.FlowZ); }
+        w.Write(f.SideChannels.Count);
+        foreach (var c in f.SideChannels) WriteLine(w, c);
+        w.Write(f.Snags.Count);
+        foreach (var n in f.Snags) { w.Write(n.X); w.Write(n.Z); w.Write(n.DirX); w.Write(n.DirZ); w.Write(n.Length); w.Write(n.Radius); w.Write(n.Seed); }
     }
 
     public static ReachField TryLoad(string path, string key)
@@ -62,6 +66,15 @@ public static class ReachCache
                 {
                     X = rd.ReadSingle(), Z = rd.ReadSingle(), Radius = rd.ReadSingle(), Top = rd.ReadSingle(), Seed = rd.ReadInt32(),
                     FlowX = rd.ReadSingle(), FlowZ = rd.ReadSingle(),
+                });
+            int nc = rd.ReadInt32();
+            for (int k = 0; k < nc; k++) f.SideChannels.Add(ReadLine(rd));
+            int ns = rd.ReadInt32();
+            for (int k = 0; k < ns; k++)
+                f.Snags.Add(new Snag
+                {
+                    X = rd.ReadSingle(), Z = rd.ReadSingle(), DirX = rd.ReadSingle(), DirZ = rd.ReadSingle(),
+                    Length = rd.ReadSingle(), Radius = rd.ReadSingle(), Seed = rd.ReadInt32(),
                 });
             return f;
         }

@@ -52,30 +52,57 @@ public static class ReachGenerator
         f.Tributary = s.Tributary;
         f.Islands.AddRange(s.Islands);
         f.Rocks.AddRange(s.Rocks);
-        Log($"centre lines: main {f.Main.Length:F0} m, tributary {f.Tributary.Length:F0} m, {f.Islands.Count} islands, {f.Rocks.Count} rocks");
+        f.SideChannels.AddRange(s.SideChannels);
+        f.Snags.AddRange(s.Snags);
+        Log($"centre lines: main {f.Main.Length:F0} m, tributary {f.Tributary.Length:F0} m, {f.SideChannels.Count} side channels, " +
+            $"{s.StillWaters.Count} still waters, {f.Islands.Count} islands, {f.Rocks.Count} rocks, {f.Snags.Count} snags");
 
         // ------------------------------------------------------------ 2. nearest centre-line sample per node
-        var mainIdx = new int[total]; var mainD2 = new float[total];
-        var tribIdx = new int[total]; var tribD2 = new float[total];
-        Stamp(f.Main, f, 110f, mainIdx, mainD2);
-        Stamp(f.Tributary, f, 60f, tribIdx, tribD2);
+        // Lines: 0 main, 1 tributary, then side channels (flowing), then still waters (oxbows, at their own level).
+        var lines = new List<Centerline> { f.Main, f.Tributary };
+        lines.AddRange(s.SideChannels);
+        int firstStill = lines.Count;
+        foreach (var still in s.StillWaters) lines.Add(still.Line);
+        int nl = lines.Count;
+        var nearIdx = new int[nl][]; var nearD2 = new float[nl][];
+        for (int l = 0; l < nl; l++)
+        {
+            nearIdx[l] = new int[total]; nearD2[l] = new float[total];
+            Stamp(lines[l], f, l == 0 ? 110f : 60f, nearIdx[l], nearD2[l]);
+        }
+        var mainIdx = nearIdx[0]; var tribIdx = nearIdx[1];
         Log("stamped centre lines");
 
         // ------------------------------------------------------------ 3. water mask
+        // A node belongs to the first line it is inside of (main, tributary, side channels, still waters); outside
+        // all of them, to the nearest line (ties: the earlier one).
         var insideMain = new bool[total]; var insideTrib = new bool[total];
         var lateral = new float[total]; var inner = new float[total]; var lineOf = new byte[total];
-        for (int i = 0; i < total; i++)
+        var stillLevel = new float[total];
+        Par.For(0, nz, iz =>
         {
-            float x = (i % nx) * s.Cell, z = (i / nx) * s.Cell;
-            insideMain[i] = Inside(f.Main, mainIdx[i], x, z, out float nM, out float innM);
-            insideTrib[i] = Inside(f.Tributary, tribIdx[i], x, z, out float nT, out float innT);
-            bool useTrib = tribIdx[i] >= 0 && (mainIdx[i] < 0 || (insideTrib[i] && !insideMain[i]) ||
-                                               (!insideMain[i] && tribD2[i] < mainD2[i]));
-            lineOf[i] = (byte)(useTrib ? 1 : 0);
-            lateral[i] = useTrib ? nT : nM;
-            inner[i] = useTrib ? innT : innM;
-            f.Water[i] = insideMain[i] || insideTrib[i];
-        }
+            for (int ix = 0; ix < nx; ix++)
+            {
+                int i = iz * nx + ix;
+                float x = ix * s.Cell, z = iz * s.Cell;
+                int best = -1;
+                float nearD = float.MaxValue, bestN = 0f, bestInn = 0f, nearN = 0f, nearInn = 0f;
+                for (int l = 0; l < nl; l++)
+                {
+                    bool ins = Inside(lines[l], nearIdx[l][i], x, z, out float n, out float inn);
+                    if (l == 0) { insideMain[i] = ins; nearN = n; nearInn = inn; }
+                    else if (l == 1) insideTrib[i] = ins;
+                    if (ins && best < 0) { best = l; bestN = n; bestInn = inn; }
+                    if (nearD2[l][i] < nearD) { nearD = nearD2[l][i]; nearN = n; nearInn = inn; lineOf[i] = (byte)l; }
+                }
+                bool water = best >= 0;
+                if (water) lineOf[i] = (byte)best;
+                lateral[i] = water ? bestN : nearN;
+                inner[i] = water ? bestInn : nearInn;
+                f.Water[i] = water;
+                stillLevel[i] = water && best >= firstStill ? s.StillWaters[best - firstStill].Level : float.NaN;
+            }
+        });
         foreach (var isl in f.Islands)
             ForNodesNear(f, isl.X, isl.Z, MathF.Max(isl.LengthDown, isl.LengthUp) * 1.4f + 10f, i =>
             {
@@ -105,7 +132,14 @@ public static class ReachGenerator
             var (wx, wz) = Wn(x, z);
             if (insideMain[i]) h = MathF.Max(h, ProfileDepth(f.Main, mainIdx[i], x, z, t, s.Seed, wx, wz));
             if (insideTrib[i]) h = MathF.Max(h, ProfileDepth(f.Tributary, tribIdx[i], x, z, t, s.Seed + 5, wx, wz));
-            if (!insideMain[i] && !insideTrib[i]) h = 0.3f;
+            bool any = insideMain[i] || insideTrib[i];
+            for (int l = 2; l < nl; l++)
+                if (Inside(lines[l], nearIdx[l][i], x, z, out _, out _))
+                {
+                    h = MathF.Max(h, ProfileDepth(lines[l], nearIdx[l][i], x, z, t, s.Seed + 5 + 7 * l, wx, wz));
+                    any = true;
+                }
+            if (!any) h = 0.3f;
             f.Depth[i] = MathF.Max(h, 0.06f);
         }
         foreach (var r in f.Rocks)
@@ -150,10 +184,15 @@ public static class ReachGenerator
             if (inflow.Line == 0) inMain += q; else inTrib += q;
         }
         f.InflowTotal = inMain + inTrib;
-        // Water cut off from the outlet (slivers left by the layout): turned into land for now. Real ponds and
-        // oxbow lakes will be placed deliberately later, with their own level.
-        int stillCount = 0;
-        for (int i = 0; i < total; i++) if (f.Water[i] && !connected[i]) { f.Water[i] = false; f.Depth[i] = 0f; stillCount++; }
+        // Water cut off from the outlet: still waters (oxbow lakes, placed deliberately with their own level) stay;
+        // slivers left by the layout are turned into land.
+        int stillCount = 0, pondCount = 0;
+        for (int i = 0; i < total; i++)
+        {
+            if (!f.Water[i] || connected[i]) continue;
+            if (!float.IsNaN(stillLevel[i])) { f.Still[i] = true; pondCount++; continue; }
+            f.Water[i] = false; f.Depth[i] = 0f; stillCount++;
+        }
         if (stillCount > 0)
         {
             Edt.Compute(f.Water, nx, nz, distToWater, nearestWater);
@@ -162,7 +201,7 @@ public static class ReachGenerator
             for (int i = 0; i < total; i++)
                 f.ShoreDist[i] = f.Water[i] ? -(distToLand[i] - 0.5f) * s.Cell : (distToWater[i] - 0.5f) * s.Cell;
         }
-        Log($"inflow main {inMain:F1} m³/s, tributary {inTrib:F1} m³/s; {stillCount} isolated water nodes turned to land");
+        Log($"inflow main {inMain:F1} m³/s, tributary {inTrib:F1} m³/s; {pondCount} still-water nodes; {stillCount} isolated water nodes turned to land");
 
         // ------------------------------------------------------------ 7. flow: surface and current
         var problem = new FlowSolver.Problem
@@ -178,9 +217,8 @@ public static class ReachGenerator
         // ------------------------------------------------------------ 7b. eddies (docs/DECISIONS.md D11)
         // Lee zones behind obstacles carry little net flow (the main current shoots past them): re-solve with their
         // conveyance cut, starting from the answer above, then add the recirculation inside them.
-        var lines = new[] { f.Main, f.Tributary };
-        var nearestIdx = new[] { mainIdx, tribIdx };
-        var lee = Eddies.LeeZones(f, connected, lines, nearestIdx, lineOf, s.Manning);
+        var lineArr = lines.ToArray();
+        var lee = Eddies.LeeZones(f, connected, lineArr, nearIdx, lineOf, s.Manning);
         var keep = new float[total];
         for (int i = 0; i < total; i++) keep[i] = 1f - Eddies.LeeBlockage * lee[i];
         problem.ConveyanceScale = keep;
@@ -211,7 +249,7 @@ public static class ReachGenerator
                 Log($"calibrated to the course: drop ratio {r:F3}, inlet now {DeepestEtaInRow(f, connected, 1) - s.InletEtaTarget:+0.000;-0.000} m off");
             }
         }
-        Eddies.AddRecirculation(f, connected, lee, lines, nearestIdx, lineOf, m => Log(m));
+        Eddies.AddRecirculation(f, connected, lee, lineArr, nearIdx, lineOf, m => Log(m));
         Log($"flow with lee zones, outflow {f.OutflowMeasured:F1} m³/s");
         // Each rock's approaching current: the mean on a ring around it (at the rock itself the water is held back).
         for (int k = 0; k < f.Rocks.Count; k++)
@@ -238,19 +276,17 @@ public static class ReachGenerator
         double slope = (cnt * sze - sz * se) / (cnt * szz - sz * sz);
         f.EtaTrendB = (float)slope; f.EtaTrendA = (float)((se - slope * sz) / cnt);
 
-        // Still water: level of the nearest flowing water a little lower (ponds sit below the river).
-        // Land: η of the nearest water node, then smoothed with distance so different waters blend.
+        // Still water: its own level. Land: η of the nearest water node (flowing or still), then smoothed with
+        // distance so different waters blend.
+        for (int i = 0; i < total; i++)
+            if (f.Still[i]) f.Eta[i] = stillLevel[i];
         for (int i = 0; i < total; i++)
         {
-            if (f.Still[i]) f.Eta[i] = float.NaN;
-        }
-        for (int i = 0; i < total; i++)
-        {
-            if (connected[i]) continue;
+            if (connected[i] || f.Still[i]) continue;
             int j = nearestWater[i];
-            float e = j >= 0 && connected[j] ? f.Eta[j] : f.EtaTrend((i / nx) * s.Cell);
+            float e = j >= 0 && (connected[j] || f.Still[j]) ? f.Eta[j] : f.EtaTrend((i / nx) * s.Cell);
             if (float.IsNaN(e)) e = f.EtaTrend((i / nx) * s.Cell);
-            f.Eta[i] = f.Still[i] ? e - 0.25f : e;
+            f.Eta[i] = e;
         }
         SmoothLandEta(f, connected);
         Log("surface extended over land");
@@ -261,7 +297,9 @@ public static class ReachGenerator
         {
             var src = new float[total];
             for (int i = 0; i < total; i++)
-                src[i] = (lineOf[i] == 0 ? mainIdx[i] : tribIdx[i]) >= 0 ? inner[i] : 0f;
+                // (Around still water: plain banks. The land inside an oxbow's crescent is its old point bar, long
+                // since grown over, not a bar of bare sand.)
+                src[i] = nearIdx[lineOf[i]][i] >= 0 && lineOf[i] < firstStill ? inner[i] : 0f;
             var tmp = new float[total];
             for (int pass = 0; pass < 2; pass++) { BoxBlur(src, tmp, nx, nz, 6, true); BoxBlur(tmp, src, nx, nz, 6, false); }
             Array.Copy(src, inner, total);
@@ -292,6 +330,22 @@ public static class ReachGenerator
             else
             {
                 var (sigma, offset) = s.ValleyAt(f.Frame.ToWorld(x, z), ref valleyHint);   // endless course: around its axis
+                float g = s.GorgeAt != null ? s.GorgeAt(sigma) : 0f;
+                if (g > 0.001f)
+                {
+                    // Gorge: a narrow rocky ledge, then a cliff of 9–25 m (bulging, jagged), then the plateau the
+                    // river has cut through. Replaces the bank and the floodplain.
+                    float n1 = 0.5f + 0.5f * Noise.Fbm(wx / 350f, wz / 350f, s.Seed + 97, 2);
+                    float n2 = 0.5f + 0.5f * Noise.Fbm(wx / 40f, wz / 40f, s.Seed + 98, 2);
+                    float cliffH = 9f + 16f * n1, ledge = 1.5f + 3f * n2, wallW = 5f + 5f * (1f - n2);
+                    float u = MathUtil.Clamp01((dW - ledge) / wallW);
+                    float face = u * u * (3f - 2f * u);
+                    float cliff = 0.5f * MathUtil.Clamp01(dW / ledge) + cliffH * face
+                                + 1.6f * Noise.Fbm(wx / 7f, wz / 7f, s.Seed + 99, 2) * 4f * u * (1f - u)
+                                + 2.5f * Noise.Fbm(wx / 90f, wz / 90f, s.Seed + 96, 2) * face;
+                    rise = MathUtil.Lerp(rise, cliff, g);
+                    flood *= 1f - g;
+                }
                 walls = Valley.ReliefAround(MathF.Abs(offset), (float)sigma, wx, wz, s.Seed);
                 // Far from water, stand on the course's level along the valley (shared by every segment), not on
                 // this grid's nearest water.
@@ -311,6 +365,10 @@ public static class ReachGenerator
                             + 0.25f * Noise.Fbm(wx / 14f, wz / 14f, isl.Seed, 2) * MathUtil.Clamp01(-sdf / 6f);
                 float k = MathUtil.Smoothstep(4f, -2f, sdf);
                 f.Height[i] = MathUtil.Lerp(f.Height[i], MathF.Min(f.Height[i], top), k);
+                // Course segments: small bars stand clear of the water (the bank shape alone keeps them within a few
+                // cm of it near their shores, and the water mesh, drawn 5 m onto land, then covered them).
+                if (s.ValleyAt != null && sdf < 0f)
+                    f.Height[i] = MathF.Max(f.Height[i], f.Eta[i] + 0.1f + MathF.Min(isl.MaxHeight, 0.6f) * MathUtil.Clamp01(-sdf / 3f));
             });
         Log("terrain");
 
@@ -514,6 +572,19 @@ public static class ReachGenerator
             }
             src[i] = MathUtil.Clamp01(v);
         }
+        // Snags: the water folds around a trunk lying in the current.
+        foreach (var sn in f.Snags)
+            for (float t = 0.15f * sn.Length; t <= sn.Length; t += 1f)
+            {
+                float px = sn.X + sn.DirX * t, pz = sn.Z + sn.DirZ * t;
+                ForNodesNear(f, px, pz, sn.Radius + 1.5f, i =>
+                {
+                    if (!active[i]) return;
+                    float x = (i % nx) * s.Cell, z = (i / nx) * s.Cell;
+                    float d = MathF.Sqrt((x - px) * (x - px) + (z - pz) * (z - pz));
+                    src[i] = MathF.Max(src[i], 0.7f * MathUtil.Smoothstep(sn.Radius + 1.5f, sn.Radius, d));
+                });
+            }
         foreach (var r in f.Rocks)
         {
             if (r.Top < -0.35f) continue;

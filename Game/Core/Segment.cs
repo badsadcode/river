@@ -21,6 +21,11 @@ public sealed class SegmentSpec
     public Centerline Main, Tributary;             // grid-local coordinates
     public List<Island> Islands = new();
     public List<Rock> Rocks = new();
+    /// <summary>Secondary channels leaving the main river and rejoining it downstream (water finds its own share).</summary>
+    public List<Centerline> SideChannels = new();
+    /// <summary>Still water on the floodplain (oxbow lakes): not connected to the river, at their own level.</summary>
+    public List<StillWater> StillWaters = new();
+    public List<Snag> Snags = new();
     public Inflow[] Inflows = Array.Empty<Inflow>();
     public float OutletEta;                         // water level held along the downstream edge (m)
     /// <summary>
@@ -41,6 +46,15 @@ public sealed class SegmentSpec
     /// stretch of river in a neighbour's grid. Null for the prototype.
     /// </summary>
     public Func<double, float> LevelAt;
+    /// <summary>For segments of the endless course: how much of a gorge the river runs in at σ (0..1). Null = none.</summary>
+    public Func<double, float> GorgeAt;
+}
+
+/// <summary>An oxbow lake or pond: its outline as a channel (centre line with half-widths and depth) and its level.</summary>
+public sealed class StillWater
+{
+    public Centerline Line;
+    public float Level;
 }
 
 /// <summary>World position → (σ along the course's valley, signed offset from its axis); hint speeds up the search.</summary>

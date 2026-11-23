@@ -100,7 +100,10 @@ void fragment() {
 
 	// Rock on the steepest slopes (valley walls).
 	float rock_k = smoothstep(0.42, 0.62, slope + (n1 - 0.5) * 0.2);
-	col = mix(col, rock * (0.75 + 0.5 * n2), rock_k);
+	// Bedding: bands of lighter and darker rock along the height (wavy), and dark joints.
+	float bed = sin(v_world.y * 2.3 + n1 * 6.0 + n2 * 1.5);
+	float strata = 0.8 + 0.2 * bed - 0.25 * smoothstep(0.75, 0.95, n3) * smoothstep(0.6, 1.0, slope);
+	col = mix(col, rock * (0.7 + 0.45 * n2) * strata, rock_k);
 
 	// Riverbed: sand in the shallows to dark silt in the deep.
 	float under = -above;

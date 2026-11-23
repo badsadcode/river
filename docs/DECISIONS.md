@@ -175,3 +175,23 @@ segment generator (deterministic, world-coordinate noise, so seams still match):
   (15 cm/s); a longer overlap lets the inlet settle (12 cm/s raw; blended values remain continuous). The test limit is
   15 cm/s raw.
 Next tiers (not done): oxbows, side channels, gorges, rapids, snags, braided reaches, island labyrinths.
+
+## D17 — River variety, tier 2 (gorges, braids, side channels, oxbows, snags)
+- **Two more reach types**: `Gorge` (9 %, 1.2–3 km, never the first reach): narrow (0.62×), deep (1.45×), still
+  winding; the segment generator replaces bank and floodplain with a rock ledge and a 9–25 m cliff (`SegmentSpec.GorgeAt`,
+  from the blended reach, so cliffs ramp in over 500 m and seams agree), boulders at the foot of the walls (≤ 60 rocks
+  per segment, the water shader's limit is 64). The terrain shader draws rock bedding (bands along the height).
+  `Braided` (9 %): 2× wide, 0.55× deep, nearly straight, rows of gravel bars every ~85 m, 2–3 slots across, staggered.
+- **Side channels** (45 % of segments, plain reaches only): a second channel leaves the river, runs 25–70 m beside it
+  behind a long island and rejoins it 400–900 m on. It is just another channel line in the generator (lines are now a
+  list: main, tributary, side channels, still waters); the flow solve splits the water by itself.
+- **Oxbow lakes** (0–2 per segment): crescent arcs on the far side of the valley from the river, at the course's level
+  minus 0.3–0.7 m. They use the field's `Still` flag (it existed, unused): water, no current, their own level, no foam;
+  plain banks around them (no sand bar inside the crescent).
+- **Snags**: fallen trees on the banks, mostly on the outside of bends, reaching ≤ 40 % of the half-width into the
+  river, foam where the current folds around them, a capsule collider (the raft bumps). `Snag.gdshader`.
+- All placed in the interior of a segment (≥ 300–500 m from cuts; snags 60 m), from the course and world positions, so
+  neighbours never disagree; side channels, oxbows and bars keep clear of each other.
+- In course segments, small bars stand ≥ 0.1 m clear of the water (the water mesh, drawn 5 m onto land, hid them).
+- Shots for checking: `gorge`, `gorge_top`, `braided`, `side_channel`, `oxbow`, `snag`.
+Still to do (tier 3): rapids and a waterfall with portage, island labyrinths, reeds and lily pads on oxbows.

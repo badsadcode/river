@@ -29,13 +29,14 @@
    sharp eddy lines, a shader-side line would). Still to judge in person: backward-running ripples and the raft's
    feel. Long lakes only get gyres near the inlet (the 6× reattachment rule).
    Shots (streamed world): `raft`, `deck`, `aerial`, `top`, `meander`, `water_close` around the raft; `lake`, `riffle`,
-   `foam_close`, `rock`, `confluence`, `split` at the first such feature downstream.
+   `foam_close`, `rock`, `confluence`, `split` at the first such feature downstream; `gorge`, `gorge_top`, `braided`
+   (first such reach), `side_channel`, `oxbow`, `snag` (first segment with one).
 2. **Generation time**: multilevel solve brought it down ~35 % (D9); multigrid-preconditioned CG would cut it further.
    The eddy step adds one fine re-solve (~1.5 s on a desktop).
 3. **Endless streaming**: phases 0–3 done: the game streams the endless course around the raft ([STREAMING.md](STREAMING.md),
    D12–D15). Next: floating origin (phase 4: float precision past ~20 km), proper horizon/mist/saves (phase 5).
-4. **River variety**: tier 1 done (D16: reach types, breathing widths, bars, bank character). Next tiers: oxbows,
-   side channels, gorges, rapids & a waterfall with portage, snags, braided reaches, island labyrinth segment type.
+4. **River variety**: tiers 1–2 done (D16: reach types, breathing widths, bars, bank character; D17: gorges, braided
+   reaches, side channels, oxbow lakes, snags). Next: rapids & a waterfall with portage, island labyrinths, reeds.
 5. Water: wakes around the raft and the oar blade, splash particles at rocks, underwater view when swimming,
    rain rings (Thornwake has rain rings and wakes worth porting).
 6. Art: real trees (Thornwake VegetationPack), grass, reeds on slow inner banks, raft textures.

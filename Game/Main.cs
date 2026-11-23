@@ -193,6 +193,37 @@ public partial class Main : Node3D
         return null;
     }
 
+    /// <summary>First reach of a kind downstream of the start (loading the river around σ = its start + into).</summary>
+    double? FindReach(ReachKind kind, double into)
+    {
+        var c = World.Course;
+        c.ExtendTo(c.Cuts[StartSegment] + 80000.0);
+        foreach (var r in c.Reaches)
+            if (r.Kind == kind && r.S0 > c.Cuts[StartSegment])
+            {
+                double s = r.S0 + Math.Min(into, 0.5 * (r.S1 - r.S0));
+                int k = 1; while (k + 1 < c.Cuts.Count && c.Cuts[k + 1] <= s) k++;
+                Streamer.LoadSync(k, 1);
+                GD.Print($"Shot: first {kind} reach at σ {r.S0:F0}–{r.S1:F0} m, segment {k}");
+                return s;
+            }
+        return null;
+    }
+
+    /// <summary>First segment from the start whose spec passes the test (loaded, with its field).</summary>
+    (ReachField f, SegmentSpec spec) FindSegment(Func<SegmentSpec, bool> test)
+    {
+        for (int k = StartSegment; k < StartSegment + 30; k++)
+        {
+            var spec = CourseSegments.Spec(World.Course, k);
+            if (!test(spec)) continue;
+            Streamer.LoadSync(k, 1);
+            GD.Print($"Shot: segment {k}");
+            return World.TryGet(k, out var f) ? (f, spec) : (null, null);
+        }
+        return (null, null);
+    }
+
     Vector3 Ground(double x, double z, float up)
     {
         var s = World.At(x, z);
@@ -299,6 +330,53 @@ public partial class Main : Node3D
                 if (FindFeature(FeatureKind.Split) is not { } f) break;
                 var p = At(f.Mid);
                 FlyCam.LookAtPoint(OnWater(p.x - p.tx * 120.0 + p.rx * 60.0, p.z - p.tz * 120.0 + p.rz * 60.0, 70f), OnWater(p.x, p.z, 0f));
+                break;
+            }
+            case "gorge":
+            {
+                if (FindReach(ReachKind.Gorge, 700.0) is not { } s) break;
+                var p = At(s); var q = At(s + 160.0);
+                FlyCam.LookAtPoint(OnWater(p.x, p.z, 6f), OnWater(q.x, q.z, 4f));
+                break;
+            }
+            case "gorge_top":
+            {
+                if (FindReach(ReachKind.Gorge, 700.0) is not { } s) break;
+                var p = At(s);
+                FlyCam.LookAtPoint(OnWater(p.x - p.tx * 140.0 + p.rx * 90.0, p.z - p.tz * 140.0 + p.rz * 90.0, 70f), OnWater(p.x, p.z, 0f));
+                break;
+            }
+            case "braided":
+            {
+                if (FindReach(ReachKind.Braided, 900.0) is not { } s) break;
+                var p = At(s);
+                FlyCam.LookAtPoint(OnWater(p.x - p.tx * 220.0 + p.rx * 130.0, p.z - p.tz * 220.0 + p.rz * 130.0, 90f), OnWater(p.x + p.tx * 60.0, p.z + p.tz * 60.0, 0f));
+                break;
+            }
+            case "side_channel":
+            case "oxbow":
+            {
+                bool side = name == "side_channel";
+                var (f, spec) = FindSegment(sp => side ? sp.SideChannels.Count > 0 : sp.StillWaters.Count > 0);
+                if (f == null) break;
+                var l = side ? spec.SideChannels[0] : spec.StillWaters[0].Line;
+                int m = l.Count / 2;
+                var (mx, mz) = f.Frame.ToWorld(l.X[m], l.Z[m]);
+                var (tx, tz) = f.Frame.ToWorld(l.X[m] + l.TanX[m], l.Z[m] + l.TanZ[m]);
+                double dx = tx - mx, dz = tz - mz;
+                float back = side ? 160f : 110f, up = side ? 65f : 55f;
+                FlyCam.LookAtPoint(OnWater(mx - dx * back - dz * 60.0, mz - dz * back + dx * 60.0, up), OnWater(mx, mz, 0f));
+                break;
+            }
+            case "snag":
+            {
+                var (f, _) = FindSegment(sp => sp.Snags.Count > 0);
+                if (f == null) break;
+                var sn = f.Snags[0];
+                foreach (var o in f.Snags) if (o.Length > sn.Length) sn = o;
+                var (rx, rz) = f.Frame.ToWorld(sn.X + sn.DirX * sn.Length * 0.6f, sn.Z + sn.DirZ * sn.Length * 0.6f);
+                var (bx, bz) = f.Frame.ToWorld(sn.X - sn.DirZ * 12f + sn.DirX * 4f, sn.Z + sn.DirX * 12f + sn.DirZ * 4f);
+                FlyCam.LookAtPoint(OnWater(bx, bz, 3f), OnWater(rx, rz, 0f));
                 break;
             }
             default:

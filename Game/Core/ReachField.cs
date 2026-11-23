@@ -11,6 +11,13 @@ public struct Rock
     public float FlowX, FlowZ;   // current approaching the rock (m/s, mean around it): drives its pillow and hollow
 }
 
+/// <summary>A fallen tree: root plate on the bank at (X, Z), trunk reaching into the water along (DirX, DirZ).</summary>
+public struct Snag
+{
+    public float X, Z, DirX, DirZ, Length, Radius;
+    public int Seed;
+}
+
 /// <summary>
 /// The generated river reach: every grid node's terrain height, water surface, depth, current and foam.
 /// This is the single source of truth for rendering (terrain, water shader), physics (raft) and gameplay.
@@ -39,6 +46,8 @@ public sealed class ReachField
     public Centerline Main, Tributary;
     public readonly List<Island> Islands = new();
     public readonly List<Rock> Rocks = new();
+    public readonly List<Centerline> SideChannels = new();
+    public readonly List<Snag> Snags = new();
 
     /// <summary>Linear fit of the water surface along the valley: EtaTrendA + EtaTrendB·z.</summary>
     public float EtaTrendA, EtaTrendB;

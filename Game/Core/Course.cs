@@ -33,7 +33,7 @@ public enum FeatureKind { Lake, Split, Riffle, Confluence }
 /// The character of a stretch of river, a few km long (blended into the next over 500 m): how strongly and how
 /// regularly it meanders, how wide and deep it runs.
 /// </summary>
-public enum ReachKind { Meander, Lazy, Straight, Wide }
+public enum ReachKind { Meander, Lazy, Straight, Wide, Gorge, Braided }
 
 public readonly record struct Reach(ReachKind Kind, double S0, double S1);
 
@@ -44,12 +44,18 @@ public struct ReachParams
     public float Wavelength;            // × the usual meander wavelength
     public float Width, Depth;          // × the usual hydraulic width and depth
     public float Irregular;             // extra wandering of the heading (noise weight)
+    public float Gorge;                 // 0..1: cliffs instead of banks (the segment generator), boulders at their feet
+    public float Braid;                 // 0..1: many gravel bars splitting the shallow channel
 
     public static ReachParams Of(ReachKind k) => k switch
     {
         ReachKind.Meander => new ReachParams { AmpBase = 1.45f, AmpVar = 1.0f, Wavelength = 1.0f, Width = 1.0f, Depth = 1.0f, Irregular = 0.25f },
         ReachKind.Lazy => new ReachParams { AmpBase = 0.95f, AmpVar = 0.8f, Wavelength = 1.5f, Width = 1.05f, Depth = 1.0f, Irregular = 0.6f },
         ReachKind.Straight => new ReachParams { AmpBase = 0.3f, AmpVar = 0.3f, Wavelength = 1.3f, Width = 0.92f, Depth = 1.1f, Irregular = 0.35f },
+        // Incised: narrow, deep and faster, still winding (incised meanders), between cliffs.
+        ReachKind.Gorge => new ReachParams { AmpBase = 0.6f, AmpVar = 0.35f, Wavelength = 1.15f, Width = 0.62f, Depth = 1.45f, Irregular = 0.3f, Gorge = 1f },
+        // Wide, shallow and fairly straight; the bars are placed per segment (CourseSegments.GravelBar).
+        ReachKind.Braided => new ReachParams { AmpBase = 0.35f, AmpVar = 0.25f, Wavelength = 1.4f, Width = 2.0f, Depth = 0.55f, Irregular = 0.4f, Braid = 1f },
         _ => new ReachParams { AmpBase = 0.8f, AmpVar = 0.6f, Wavelength = 1.3f, Width = 1.6f, Depth = 0.62f, Irregular = 0.4f },   // Wide
     };
 
@@ -58,6 +64,7 @@ public struct ReachParams
         AmpBase = a.AmpBase + (b.AmpBase - a.AmpBase) * t, AmpVar = a.AmpVar + (b.AmpVar - a.AmpVar) * t,
         Wavelength = a.Wavelength + (b.Wavelength - a.Wavelength) * t, Width = a.Width + (b.Width - a.Width) * t,
         Depth = a.Depth + (b.Depth - a.Depth) * t, Irregular = a.Irregular + (b.Irregular - a.Irregular) * t,
+        Gorge = a.Gorge + (b.Gorge - a.Gorge) * t, Braid = a.Braid + (b.Braid - a.Braid) * t,
     };
 }
 
@@ -171,7 +178,10 @@ public sealed class Course
 
     // ================================================================ reaches
 
-    /// <summary>Reaches of 2–6 km, one after another: tight meanders 35 %, lazy bends 30 %, near-straight 15 %, wide 20 %.</summary>
+    /// <summary>
+    /// Reaches one after another: tight meanders 30 %, lazy bends 25 %, near-straight 12 %, wide 15 %, gorge 9 %,
+    /// braided 9 %. 2–6 km long; gorges 1.2–3 km (and never the first reach: the journey starts on open water).
+    /// </summary>
     void ScheduleReaches(double upTo)
     {
         while (Reaches.Count == 0 || Reaches[^1].S1 < upTo)
@@ -180,9 +190,12 @@ public sealed class Course
             float H(int k) => Noise.Hash01(e, k, Settings.Seed + 811);
             double s0 = e == 0 ? -1000.0 : Reaches[^1].S1;
             float pick = H(1);
-            var kind = pick < 0.35f ? ReachKind.Meander : pick < 0.65f ? ReachKind.Lazy : pick < 0.8f ? ReachKind.Straight : ReachKind.Wide;
-            if (e > 0 && kind == Reaches[^1].Kind) kind = (ReachKind)(((int)kind + 1 + (int)(H(2) * 3f)) % 4);   // a change
-            Reaches.Add(new Reach(kind, s0, s0 + 2000.0 + 4000.0 * H(0)));
+            var kind = pick < 0.30f ? ReachKind.Meander : pick < 0.55f ? ReachKind.Lazy : pick < 0.67f ? ReachKind.Straight
+                     : pick < 0.82f ? ReachKind.Wide : pick < 0.91f ? ReachKind.Gorge : ReachKind.Braided;
+            if (e > 0 && kind == Reaches[^1].Kind) kind = (ReachKind)(((int)kind + 1 + (int)(H(2) * 5f)) % 6);   // a change
+            if (e == 0 && kind == ReachKind.Gorge) kind = ReachKind.Meander;
+            double len = kind == ReachKind.Gorge ? 1200.0 + 1800.0 * H(0) : 2000.0 + 4000.0 * H(0);
+            Reaches.Add(new Reach(kind, s0, s0 + len));
         }
     }
 

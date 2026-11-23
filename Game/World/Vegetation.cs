@@ -92,6 +92,74 @@ public static class Vegetation
         }
 
         root.AddChild(BuildRocks(f));
+        if (f.Snags.Count > 0) root.AddChild(BuildSnags(f));
+        return root;
+    }
+
+    // ---------------------------------------------------------------- snags (fallen trees in the water)
+
+    /// <summary>Oriented tapered cylinder from a to c (outward faces).</summary>
+    static void Limb(MeshBuilder b, Vector3 a, Vector3 c, float r0, float r1, int sides, Func<float, Color> colAt)
+    {
+        var axis = (c - a).Normalized();
+        var u = axis.Cross(MathF.Abs(axis.Y) < 0.9f ? Vector3.Up : Vector3.Right).Normalized();
+        var v = u.Cross(axis);
+        for (int s = 0; s < sides; s++)
+        {
+            float a0 = s * MathF.Tau / sides, a1 = (s + 1) * MathF.Tau / sides;
+            Vector3 D(float ang) => u * MathF.Cos(ang) + v * MathF.Sin(ang);
+            var p0 = a + D(a0) * r0; var p1 = a + D(a1) * r0;
+            var q0 = c + D(a0) * r1; var q1 = c + D(a1) * r1;
+            var col = colAt(((p0 + q1) * 0.5f).Y);
+            b.Tri(p0, q0, p1, col); b.Tri(p1, q0, q1, col);
+        }
+    }
+
+    /// <summary>
+    /// Snags: a bark trunk from the root plate on the bank down into the water (half submerged at its tip), a few
+    /// broken branch stubs, darker where wet. One mesh for the segment; a capsule collider per trunk (the raft bumps).
+    /// </summary>
+    static Node3D BuildSnags(ReachField f)
+    {
+        var root = new Node3D { Name = "Snags" };
+        var body = new StaticBody3D { Name = "SnagCollision", CollisionLayer = 1, CollisionMask = 0 };
+        root.AddChild(body);
+        var b = new MeshBuilder();
+        foreach (var sn in f.Snags)
+        {
+            var rng = new Rng(sn.Seed);
+            float tipX = sn.X + sn.DirX * sn.Length, tipZ = sn.Z + sn.DirZ * sn.Length;
+            float eta = f.SampleEta(tipX, tipZ);
+            var basePt = new Vector3(sn.X, MathF.Max(f.SampleHeight(sn.X, sn.Z), eta) + sn.Radius * 0.6f, sn.Z);
+            var tip = new Vector3(tipX, eta - sn.Radius * 0.3f, tipZ);
+            var bark = new Color(0.12f, 0.095f, 0.07f) * rng.Range(0.8f, 1.15f);   // linear: a weathered grey-brown
+            var wet = new Color(0.045f, 0.038f, 0.03f);
+            Color ColAt(float y) => y < eta + 0.12f ? wet : bark;
+            Limb(b, basePt, tip, sn.Radius, sn.Radius * 0.55f, 7, ColAt);
+            // Root plate: a squat disc across the trunk at its base.
+            var axis = (tip - basePt).Normalized();
+            Limb(b, basePt - axis * 0.25f, basePt + axis * 0.15f, sn.Radius * 4.5f, sn.Radius * 3.2f, 9, _ => new Color(0.09f, 0.07f, 0.05f));
+            // Broken branches.
+            int nb = 3 + (int)(rng.Next01() * 4f);
+            for (int i = 0; i < nb; i++)
+            {
+                float t = rng.Range(0.35f, 0.9f);
+                var at = basePt.Lerp(tip, t);
+                var side = axis.Cross(Vector3.Up).Normalized() * (rng.Next01() < 0.5f ? -1f : 1f);
+                var dir = (side + axis * rng.Range(0.3f, 0.9f) + Vector3.Up * rng.Range(-0.1f, 0.7f)).Normalized();
+                Limb(b, at, at + dir * rng.Range(1.2f, 3.5f), sn.Radius * 0.35f, sn.Radius * 0.12f, 5, ColAt);
+            }
+            var mid = (basePt + tip) * 0.5f;
+            var x = axis.Cross(MathF.Abs(axis.Y) < 0.9f ? Vector3.Up : Vector3.Right).Normalized();
+            var basis = new Basis(x, axis, x.Cross(axis));
+            body.AddChild(new CollisionShape3D
+            {
+                Shape = new CapsuleShape3D { Radius = sn.Radius, Height = (tip - basePt).Length() + 2f * sn.Radius },
+                Transform = new Transform3D(basis, mid),
+            });
+        }
+        var mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://Game/Shaders/Snag.gdshader") };
+        root.AddChild(new MeshInstance3D { Name = "SnagMesh", Mesh = b.Build(), MaterialOverride = mat });
         return root;
     }
 

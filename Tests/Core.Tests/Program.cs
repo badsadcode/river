@@ -158,6 +158,22 @@ Console.WriteLine("Course:");
     for (int k = 0; k < cutsChecked && sameCourse; k++) sameCourse = stepped.Cuts[k] == course.Cuts[k];
     Check(sameCourse, "built in steps or at once, the course is identical");
 
+    // Variety along 50 km (D16, D17): every reach type turns up, and the segment-level extras get placed.
+    var kinds = new System.Collections.Generic.HashSet<ReachKind>();
+    foreach (var r in course.Reaches) if (r.S0 < 50000.0) kinds.Add(r.Kind);
+    Check(kinds.Count == Enum.GetValues<ReachKind>().Length, $"every reach type within 50 km ({string.Join(", ", kinds)})");
+    int sides = 0, oxbows = 0, snags = 0, gorgeRocks = 0, bars = 0;
+    for (int k = 1; k < cutsChecked - 1; k++)
+    {
+        var sp = CourseSegments.Spec(course, k);
+        sides += sp.SideChannels.Count; oxbows += sp.StillWaters.Count; snags += sp.Snags.Count; bars += sp.Islands.Count;
+        if (Environment.GetEnvironmentVariable("RIVER_VARIETY") != null)
+            Console.WriteLine($"    k={k} σ={course.Cuts[k]:F0}: reach {course.ReachAt(course.Cuts[k] + 500).Gorge:F1}g {course.ReachAt(course.Cuts[k] + 500).Braid:F1}b, {sp.SideChannels.Count} side, {sp.StillWaters.Count} oxbow, {sp.Snags.Count} snags, {sp.Islands.Count} islands, hw {course.HalfLeft[course.RiverIndexAt(course.Cuts[k] + 900)]:F0}");
+        foreach (var r in sp.Rocks) if (r.Seed - cs.Seed - 9800 >= 0) gorgeRocks++;
+    }
+    Console.WriteLine($"  segments 1–{cutsChecked - 2}: {sides} side channels, {oxbows} oxbow lakes, {snags} snags, {gorgeRocks} gorge boulders, {bars} islands and bars");
+    Check(sides >= 2 && oxbows >= 3 && snags >= 20 && gorgeRocks >= 5, "side channels, oxbow lakes, snags and gorge boulders get placed");
+
     if (coursePath != null)
     {
         CourseMap.Write(course, 0.0, 50000.0, 20.0, coursePath);
@@ -177,6 +193,29 @@ Console.WriteLine("Segments:");
     var sw = System.Diagnostics.Stopwatch.StartNew();
     foreach (int k in new[] { 3, 1, 4, 2 }) world.Add(k, ReachGenerator.Generate(CourseSegments.Spec(course, k)));   // out of order
     Console.WriteLine($"  segments 1–4 ({course.Cuts[5] - course.Cuts[1]:F0} m of valley) generated out of order in {sw.ElapsedMilliseconds / 1000.0:F1} s");
+
+    // Oxbow lakes are still water at their own level; side channels carry part of the river.
+    {
+        int stillNodes = 0, stillBad = 0, channels = 0, channelsFlowing = 0;
+        for (int k = 1; k <= 4; k++)
+        {
+            world.TryGet(k, out var f);
+            for (int i = 0; i < f.Water.Length; i++)
+            {
+                if (!f.Still[i]) continue;
+                stillNodes++;
+                if (!f.Water[i] || f.VelX[i] != 0f || f.VelZ[i] != 0f || f.Foam[i] != 0f || f.Depth[i] <= 0f || float.IsNaN(f.Eta[i])) stillBad++;
+            }
+            foreach (var l in f.SideChannels)
+            {
+                channels++;
+                var (vx, vz) = f.SampleVelocity(l.X[l.Count / 2], l.Z[l.Count / 2]);
+                if (MathF.Sqrt(vx * vx + vz * vz) > 0.1f && vx * l.TanX[l.Count / 2] + vz * l.TanZ[l.Count / 2] > 0f) channelsFlowing++;
+            }
+        }
+        Check(stillNodes > 1000 && stillBad == 0, $"oxbow lakes are still water at their own level ({stillNodes} nodes, {stillBad} wrong)");
+        Check(channels > 0 && channelsFlowing == channels, $"side channels carry a current downstream ({channelsFlowing}/{channels})");
+    }
 
     // Along each interior cut line, compare the two neighbours' independent solutions (before any blending).
     float worstEta = 0f, worstVel = 0f, worstLandFar = 0f, worstLandNear = 0f, worstBankVel = 0f, worstBankLand = 0f;

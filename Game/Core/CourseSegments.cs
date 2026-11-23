@@ -102,8 +102,14 @@ public static class CourseSegments
                     break;
             }
         }
-        GravelBar(c, k, spec, L, LDir);
-        spec.Tributary ??= new Centerline();            // no tributary: an empty line (generator copes)
+        var occupied = new List<Centerline>();          // lines placed so far (tributary, side channel, oxbows)
+        if (spec.Tributary != null) occupied.Add(spec.Tributary);
+        SideChannel(c, k, spec, L, occupied);
+        Oxbows(c, k, spec, L, occupied);
+        GorgeBoulders(c, k, spec, L);
+        GravelBar(c, k, spec, L, LDir, occupied);
+        Snags(c, k, spec, L, LDir);
+        spec.Tributary ??= new Centerline();           // no tributary: an empty line (generator copes)
         if (spec.Tributary.Count == 0) spec.Tributary.Finish();
         spec.Inflows = inflows.ToArray();
 
@@ -116,6 +122,7 @@ public static class CourseSegments
             return (sigma, offset);
         };
         spec.LevelAt = sigma => c.Eta[c.RiverIndexAt(sigma)];
+        spec.GorgeAt = sigma => c.ReachAt(sigma).Gorge;
         return spec;
     }
 
@@ -184,17 +191,24 @@ public static class CourseSegments
     ///   • mid-channel bars: in wide reaches, every ~300 m half the time, low and long, a little off centre.
     /// </summary>
     static void GravelBar(Course c, int k, SegmentSpec spec,
-                          Func<double, double, (float, float)> L, Func<double, double, (float, float)> LDir)
+                          Func<double, double, (float, float)> L, Func<double, double, (float, float)> LDir, List<Centerline> occupied)
     {
         int a = c.RiverIndexAt(c.Cuts[k] + 400.0), b = c.RiverIndexAt(c.Cuts[k + 1] - 400.0);
-        bool NearFeature(int i)
-        {
-            foreach (var f in c.Features) if (c.Sigma[i] > f.S0 - 100.0 && c.Sigma[i] < f.S1 + 100.0) return true;
-            return false;
-        }
+        bool NearFeature(int i) => CourseSegments.NearFeature(c, i, 100.0);
         bool Clear(Island isl, float margin)
         {
             foreach (var o in spec.Islands) if (o.Sdf(isl.X, isl.Z) < isl.HalfWidth + margin) return false;
+            // Never across a side channel or its mouth.
+            foreach (var l in occupied)
+            {
+                float reach = MathF.Max(isl.LengthUp, isl.LengthDown) + 40f;
+                for (int j = 0; j < l.Count; j += 2)
+                {
+                    float dx = l.X[j] - isl.X, dz = l.Z[j] - isl.Z;
+                    if (dx * dx + dz * dz > reach * reach) continue;
+                    if (isl.Sdf(l.X[j], l.Z[j]) < MathF.Max(l.HalfLeft[j], l.HalfRight[j]) + 6f) return false;
+                }
+            }
             return true;
         }
         float Turn(int i) => c.Heading[i + 6] - c.Heading[i - 6];     // turning over ±12 m
@@ -219,13 +233,40 @@ public static class CourseSegments
             spec.Islands.Add(bar);
             n++;
         }
-        // Mid-channel bars in wide reaches.
+        // Braided reaches: rows of bars every ~85 m, 2–3 slots across (staggered row to row), most of them filled,
+        // splitting the shallow river into threads that part and rejoin.
         double next = c.Sigma[a];
+        int row = 0;
+        for (int i = a; i < b; i++)
+        {
+            if (c.Sigma[i] < next) continue;
+            next = c.Sigma[i] + 85.0;
+            if (c.ReachAt(c.Sigma[i]).Braid < 0.5f || NearFeature(i)) continue;
+            row++;
+            float hw = MathF.Min(c.HalfLeft[i], c.HalfRight[i]);
+            float half = Math.Clamp(0.2f * hw, 5f, 15f);
+            int slots = hw > 28f ? 3 : 2;
+            float spacing = 1.5f * hw / slots;
+            for (int p = 0; p < slots; p++)
+            {
+                float h3 = Noise.Hash01(i, 7 + p, c.Settings.Seed + 9250), h4 = Noise.Hash01(i, 17 + p, c.Settings.Seed + 9250);
+                if (h4 > 0.75f) continue;
+                float lateral = (p - (slots - 1) * 0.5f + (row % 2 == 0 ? 0.25f : -0.25f)) * spacing + (h3 - 0.5f) * 0.16f * hw;
+                var bar = MakeIsland(c, i + (int)(h4 * 12f), lateral, half * (1.8f + h3), half * (4f + 2f * h3), half * (0.8f + 0.4f * h3),
+                                     0.3f + 0.3f * h3, 0.4f, c.Settings.Seed + 9700 + k * 256 + n, L, LDir);
+                if (!Clear(bar, 2f)) continue;
+                spec.Islands.Add(bar);
+                n++;
+            }
+        }
+        // Mid-channel bars in wide reaches.
+        next = c.Sigma[a];
         for (int i = a; i < b; i++)
         {
             if (c.Sigma[i] < next) continue;
             next = c.Sigma[i] + 300.0;
-            if (c.ReachAt(c.Sigma[i]).Width < 1.35f || NearFeature(i)) continue;
+            var rp = c.ReachAt(c.Sigma[i]);
+            if (rp.Width < 1.35f || rp.Braid >= 0.5f || NearFeature(i)) continue;
             float h1 = Noise.Hash01(i, 3, c.Settings.Seed + 9200), h2 = Noise.Hash01(i, 4, c.Settings.Seed + 9200);
             if (h1 > 0.5f) continue;
             float hw = MathF.Min(c.HalfLeft[i], c.HalfRight[i]);
@@ -235,6 +276,236 @@ public static class CourseSegments
             if (!Clear(bar, 12f)) continue;
             spec.Islands.Add(bar);
             n++;
+        }
+    }
+
+    // ================================================================ tier-2 variety (docs/DECISIONS.md D17)
+
+    static bool NearFeature(Course c, int i, double margin)
+    {
+        foreach (var f in c.Features) if (c.Sigma[i] > f.S0 - margin && c.Sigma[i] < f.S1 + margin) return true;
+        return false;
+    }
+
+    /// <summary>Distance from (x, z) to the nearest sample of a line, minus that sample's wider half-width.</summary>
+    static float GapToLine(Centerline l, float x, float z)
+    {
+        float best = float.MaxValue;
+        for (int j = 0; j < l.Count; j++)
+        {
+            float dx = l.X[j] - x, dz = l.Z[j] - z, d2 = dx * dx + dz * dz;
+            float h = MathF.Max(l.HalfLeft[j], l.HalfRight[j]);
+            if (d2 > (best + h) * (best + h)) continue;
+            best = MathF.Min(best, MathF.Sqrt(d2) - h);
+        }
+        return best;
+    }
+
+    /// <summary>A polyline resampled every <see cref="Centerline.Step"/> m (half-width and depth per point).</summary>
+    static Centerline Resample(List<(float x, float z, float half, float depth)> p)
+    {
+        var line = new Centerline();
+        line.Add(p[0].x, p[0].z, p[0].half, p[0].half, p[0].depth);
+        float acc = 0f;                                // distance walked since the last emitted point
+        for (int j = 1; j < p.Count; j++)
+        {
+            float dx = p[j].x - p[j - 1].x, dz = p[j].z - p[j - 1].z, len = MathF.Sqrt(dx * dx + dz * dz);
+            float t = Centerline.Step - acc;
+            for (; t <= len; t += Centerline.Step)
+            {
+                float u = t / MathF.Max(len, 1e-6f);
+                float h = MathUtil.Lerp(p[j - 1].half, p[j].half, u), d = MathUtil.Lerp(p[j - 1].depth, p[j].depth, u);
+                line.Add(p[j - 1].x + dx * u, p[j - 1].z + dz * u, h, h, d);
+            }
+            acc = len - (t - Centerline.Step);
+        }
+        line.Finish();
+        return line;
+    }
+
+    /// <summary>
+    /// A side channel (anabranch), in 45 % of segments: it leaves the main river, runs parallel to it 25–70 m away
+    /// behind a long wooded island, and rejoins it 400–900 m downstream. The flow solve gives it its own share of the
+    /// water (a raft can take it). Plain reaches only (no features, gorges or braids), away from the cuts.
+    /// </summary>
+    static void SideChannel(Course c, int k, SegmentSpec spec, Func<double, double, (float, float)> L, List<Centerline> occupied)
+    {
+        int seed = c.Settings.Seed;
+        if (Noise.Hash01(k, 1, seed + 9300) > 0.45f) return;
+        int a = c.RiverIndexAt(c.Cuts[k] + 500.0), b = c.RiverIndexAt(c.Cuts[k + 1] - 500.0);
+        for (int attempt = 0; attempt < 14; attempt++)
+        {
+            float H(int j) => Noise.Hash01(k * 32 + attempt, j, seed + 9301);
+            int n = (int)((400f + 500f * H(0)) / Centerline.Step);
+            if (b - a <= n + 10) return;
+            int ia = a + (int)(H(1) * (b - a - n)), ib = ia + n;
+            bool plain = true;
+            for (int i = ia; i <= ib && plain; i += 10)
+            {
+                var rp = c.ReachAt(c.Sigma[i]);
+                if (NearFeature(c, i, 150.0) || rp.Gorge > 0.2f || rp.Braid > 0.3f) plain = false;
+            }
+            if (!plain) continue;
+            float hwMain = MathF.Min(c.HalfLeft[ia], c.HalfRight[ia]);
+            float chanHalf = Math.Clamp(0.32f * hwMain, 5f, 14f);
+            float depth = Math.Clamp(0.55f * c.MaxDepth[ia], 1.1f, 2.6f);
+            float gap = 25f + 45f * H(3);
+            int side0 = H(2) < 0.5f ? -1 : 1;
+            for (int ts = 0; ts < 2; ts++)
+            {
+                int side = ts == 0 ? side0 : -side0;
+                var pts = new List<(float x, float z, float half, float depth)>();
+                bool ok = true;
+                for (int i = ia; i <= ib && ok; i++)
+                {
+                    float t = (i - ia) / (float)n;
+                    float p = MathUtil.Smoothstep(0f, 0.3f, t) * MathUtil.Smoothstep(1f, 0.7f, t);
+                    float hwSide = side > 0 ? c.HalfRight[i] : c.HalfLeft[i];
+                    float far = hwSide + chanHalf + gap;
+                    float o = side * (0.35f * hwSide + (far - 0.35f * hwSide) * p
+                                      + 0.25f * gap * MathF.Sin(MathF.PI * 3f * t + 6f * H(4)) * p);
+                    var (rx, rz) = c.RiverRight(i);
+                    var (lx, lz) = L(c.X[i] + rx * o, c.Z[i] + rz * o);
+                    if (lx < 30f || lx > spec.SizeX - 30f || lz < 30f || lz > spec.SizeZ - 30f) ok = false;
+                    pts.Add((lx, lz, chanHalf, depth));
+                }
+                if (!ok) continue;
+                // No folds (offset curves fold on the inside of tight bends): consecutive steps keep their direction.
+                for (int j = 2; j < pts.Count && ok; j++)
+                {
+                    float ax = pts[j - 1].x - pts[j - 2].x, az = pts[j - 1].z - pts[j - 2].z;
+                    float bx = pts[j].x - pts[j - 1].x, bz = pts[j].z - pts[j - 1].z;
+                    float la = MathF.Sqrt(ax * ax + az * az), lb = MathF.Sqrt(bx * bx + bz * bz);
+                    if (lb < 0.3f || lb > 8f || (ax * bx + az * bz) < 0.6f * la * lb) ok = false;
+                }
+                if (!ok) continue;
+                // A real island between the two: away from the main river (any arm of it) and other lines.
+                for (int j = 0; j < pts.Count && ok; j += 3)
+                {
+                    float t = j / (float)(pts.Count - 1);
+                    if (t < 0.3f || t > 0.7f) continue;
+                    if (GapToLine(spec.Main, pts[j].x, pts[j].z) - chanHalf < 0.6f * gap) ok = false;
+                    foreach (var l in occupied) if (GapToLine(l, pts[j].x, pts[j].z) - chanHalf < 25f) ok = false;
+                }
+                if (!ok) continue;
+                var line = Resample(pts);
+                spec.SideChannels.Add(line);
+                occupied.Add(line);
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Oxbow lakes: 0–2 per segment, crescent-shaped cut-off meander loops on the floodplain, on the far side of the
+    /// valley from the river, at the course's level there minus 0.3–0.7 m. Still water (no current).
+    /// </summary>
+    static void Oxbows(Course c, int k, SegmentSpec spec, Func<double, double, (float, float)> L, List<Centerline> occupied)
+    {
+        int seed = c.Settings.Seed;
+        float hc = Noise.Hash01(k, 1, seed + 9600);
+        int want = hc < 0.35f ? 0 : hc < 0.8f ? 1 : 2, placed = 0;
+        double span = c.Cuts[k + 1] - c.Cuts[k] - 900.0;
+        if (span <= 0) return;
+        for (int attempt = 0; attempt < 30 && placed < want; attempt++)
+        {
+            float H(int j) => Noise.Hash01(k * 64 + attempt, j, seed + 9601);
+            double sc = c.Cuts[k] + 450.0 + span * H(0);
+            if (c.ReachAt(sc).Gorge > 0.05f) continue;
+            int iR = c.RiverIndexAt(sc);
+            float hw = 0.5f * (c.HalfLeft[iR] + c.HalfRight[iR]);
+            float R = Math.Clamp(hw * (3f + 2f * H(1)), 50f, 160f);
+            float half = MathF.Min(Math.Clamp(0.7f * hw, 7f, 32f) * (0.8f + 0.3f * H(2)), 0.22f * R);
+            // On the other side of the valley axis from the river, inside the floodplain (walls start ~330 m out).
+            float riverOff = c.Offset[iR];
+            float lo = R + half + 20f, hi = 330f - R - half;
+            if (hi <= lo) continue;
+            float off = -MathF.Sign(riverOff == 0f ? 1f : riverOff) * (lo + (hi - lo) * H(3));
+            var (vx, vz) = c.ValleyPoint(sc);
+            float hv = c.ValleyHeadingAt(sc);
+            double cx = vx + MathF.Cos(hv) * off, cz = vz - MathF.Sin(hv) * off;
+            float a0 = MathF.Tau * H(4), arc = (200f + 70f * H(5)) * MathF.PI / 180f;
+            float dir = H(6) < 0.5f ? -1f : 1f;
+            int steps = (int)(arc * R / Centerline.Step);
+            float baseDepth = 1.2f + 1.3f * H(7);
+            var pts = new List<(float x, float z, float half, float depth)>();
+            bool ok = true;
+            for (int j = 0; j <= steps && ok; j++)
+            {
+                float t = j / (float)steps, ang = a0 + dir * arc * t;
+                float r = R * (1f + 0.12f * Noise.Fbm1(ang * 1.3f, seed + 9602 + attempt, 2));
+                float taper = MathUtil.Smoothstep(0f, 0.15f, t) * MathUtil.Smoothstep(1f, 0.85f, t);
+                var (lx, lz) = L(cx + MathF.Cos(ang) * r, cz + MathF.Sin(ang) * r);
+                if (lx < 30f || lx > spec.SizeX - 30f || lz < 30f || lz > spec.SizeZ - 30f) ok = false;
+                pts.Add((lx, lz, half * (0.45f + 0.55f * taper), baseDepth * (0.5f + 0.5f * taper)));
+            }
+            if (!ok) continue;
+            for (int j = 0; j < pts.Count && ok; j += 4)
+            {
+                if (GapToLine(spec.Main, pts[j].x, pts[j].z) - pts[j].half < 35f) ok = false;
+                foreach (var l in occupied) if (GapToLine(l, pts[j].x, pts[j].z) - pts[j].half < 30f) ok = false;
+            }
+            if (!ok) continue;
+            var line = Resample(pts);
+            spec.StillWaters.Add(new StillWater { Line = line, Level = c.Eta[iR] - (0.3f + 0.4f * H(8)) });
+            occupied.Add(line);
+            placed++;
+        }
+    }
+
+    /// <summary>Boulders fallen from the cliffs, at the foot of the walls in gorges (some awash). ≤ 60 rocks a segment.</summary>
+    static void GorgeBoulders(Course c, int k, SegmentSpec spec, Func<double, double, (float, float)> L)
+    {
+        int seed = c.Settings.Seed;
+        int a = c.RiverIndexAt(c.Cuts[k] + 300.0), b = c.RiverIndexAt(c.Cuts[k + 1] - 300.0);
+        int budget = 60 - spec.Rocks.Count;
+        for (int i = a; i < b && budget > 0; i += 12)
+        {
+            if (c.ReachAt(c.Sigma[i]).Gorge < 0.6f || NearFeature(c, i, 60.0)) continue;
+            float H(int j) => Noise.Hash01(i, j, seed + 9800);
+            if (H(0) > 0.4f) continue;
+            int side = H(1) < 0.5f ? -1 : 1;
+            float hw = side > 0 ? c.HalfRight[i] : c.HalfLeft[i];
+            float lat = side * hw * (0.72f + 0.25f * H(2));
+            var (rx, rz) = c.RiverRight(i);
+            var (lx, lz) = L(c.X[i] + rx * lat, c.Z[i] + rz * lat);
+            spec.Rocks.Add(new Rock { X = lx, Z = lz, Radius = 0.7f + 1.6f * H(3) * H(3), Top = -0.3f + 1.1f * H(4), Seed = seed + 9800 + i });
+            budget--;
+        }
+    }
+
+    /// <summary>
+    /// Snags: fallen trees, root plate on the bank, trunk lying in the water at 20–55° to the current, mostly on the
+    /// outside of bends (where the bank is undercut). They reach at most 40 % of the half-width into the river.
+    /// </summary>
+    static void Snags(Course c, int k, SegmentSpec spec, Func<double, double, (float, float)> L, Func<double, double, (float, float)> LDir)
+    {
+        int seed = c.Settings.Seed;
+        int a = c.RiverIndexAt(c.Cuts[k] + 60.0), b = c.RiverIndexAt(c.Cuts[k + 1] - 60.0);
+        for (int i = a + 7; i < b - 7; i += 15)
+        {
+            if (c.ReachAt(c.Sigma[i]).Gorge > 0.5f) continue;
+            float H(int j) => Noise.Hash01(i, j, seed + 9400);
+            float d = c.Heading[i + 6] - c.Heading[i - 6];
+            float apex = MathUtil.Clamp01(MathF.Abs(d) / 0.5f);
+            if (H(0) > 0.04f + 0.22f * apex) continue;
+            // Turning left (d > 0): the inner bank is on the left, the undercut outer bank on the right.
+            int side = MathF.Abs(d) < 0.05f ? (H(1) < 0.5f ? -1 : 1) : d > 0 ? 1 : -1;
+            float hw = side > 0 ? c.HalfRight[i] : c.HalfLeft[i];
+            float phi = (20f + 35f * H(2)) * MathF.PI / 180f;
+            float len = MathF.Min(7f + 8f * H(3), 0.4f * hw / MathF.Sin(phi));
+            if (len < 5f) continue;
+            var (rx, rz) = c.RiverRight(i);
+            float tx = MathF.Sin(c.Heading[i]), tz = MathF.Cos(c.Heading[i]);
+            double rootX = c.X[i] + rx * side * (hw + 1.5f), rootZ = c.Z[i] + rz * side * (hw + 1.5f);
+            double dx = tx * MathF.Cos(phi) - side * rx * MathF.Sin(phi), dz = tz * MathF.Cos(phi) - side * rz * MathF.Sin(phi);
+            var (lx, lz) = L(rootX, rootZ);
+            var (ldx, ldz) = LDir(dx, dz);
+            float tipX = lx + ldx * len, tipZ = lz + ldz * len;
+            bool clear = true;
+            foreach (var isl in spec.Islands) if (isl.Sdf(tipX, tipZ) < 3f || isl.Sdf(lx, lz) < 3f) { clear = false; break; }
+            if (!clear) continue;
+            spec.Snags.Add(new Snag { X = lx, Z = lz, DirX = ldx, DirZ = ldz, Length = len, Radius = 0.25f + 0.2f * H(4), Seed = seed + 9400 + i });
         }
     }
 
