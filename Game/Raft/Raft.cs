@@ -36,6 +36,7 @@ public partial class Raft : RigidBody3D
 
     // Control inputs (set by the player each physics frame)
     public float SteerInput, RowInput;
+    public float? ForcedSteer, ForcedRow;     // tests override the player's inputs
     public Vector3 PoleDirection;             // world, horizontal, |.| ≤ 1; zero = not poling
     public bool AnchorDown { get; private set; }
     public Vector3 AnchorPoint { get; private set; }
@@ -193,13 +194,14 @@ public partial class Raft : RigidBody3D
         ApplyTorque(-tilt * 4000f);
 
         // Sweep oar at the stern: a sideways push (turns the raft) and a little forward/back sculling.
-        _oarAngle = Mathf.Lerp(_oarAngle, SteerInput * 0.55f, 1f - MathF.Exp(-dt * 3f));
+        float steer = ForcedSteer ?? SteerInput, row = ForcedRow ?? RowInput;
+        _oarAngle = Mathf.Lerp(_oarAngle, steer * 0.55f, 1f - MathF.Exp(-dt * 3f));
         if (OarPivot != null) OarPivot.Rotation = new Vector3(0, _oarAngle, 0);
         var stern = xf * new Vector3(0, -0.1f, Length * 0.5f + 2.5f);
         var side = xf.Basis.X;
         var fwd = -xf.Basis.Z;
-        if (MathF.Abs(SteerInput) > 0.01f) ApplyForce(side * SteerInput * 1500f, stern - GlobalPosition);
-        if (MathF.Abs(RowInput) > 0.01f) ApplyForce(fwd * RowInput * 520f, stern - GlobalPosition);
+        if (MathF.Abs(steer) > 0.01f) ApplyForce(side * steer * 700f, stern - GlobalPosition);
+        if (MathF.Abs(row) > 0.01f) ApplyForce(fwd * row * 520f, stern - GlobalPosition);
 
         // Pole: push off the bottom where the water is shallow enough.
         var poleAt = LoadMass > 0 ? LoadPoint : GlobalPosition;

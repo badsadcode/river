@@ -257,11 +257,36 @@ public partial class Main : Node3D
             {
                 var p = Raft.GlobalPosition;
                 var (wx, wz) = Field.SampleVelocity(p.X, p.Z);
+                GD.Print($"PLAYER on raft {Player.OnRaft}, swimming {Player.Swimming}, local {Raft.ToLocal(Player.GlobalPosition)}");
                 GD.Print($"DRIFT {t,6:F0} {p.X,8:F1} {p.Z,8:F1} {Raft.LinearVelocity.Length(),5:F2} {MathF.Sqrt(wx * wx + wz * wz),5:F2} {Field.SampleDepth(p.X, p.Z),5:F2} {Mathf.RadToDeg(up.AngleTo(Vector3.Up)),5:F1}");
                 nextLog += 10f;
             }
         }
         var end = Raft.GlobalPosition;
+        // Steering check: full sweep-oar for 12 s, then sculling forward for 20 s.
+        float yaw0 = Raft.GlobalRotation.Y;
+        Raft.ForcedSteer = 1f;
+        float maxYawRate = 0f;
+        for (float s = 0; s < 12f; s += (float)GetPhysicsProcessDeltaTime())
+        {
+            await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);
+            maxYawRate = MathF.Max(maxYawRate, MathF.Abs(Raft.AngularVelocity.Y));
+        }
+        float turned = Mathf.RadToDeg(Mathf.AngleDifference(yaw0, Raft.GlobalRotation.Y));
+        Raft.ForcedSteer = 0f;
+        for (float s = 0; s < 8f; s += (float)GetPhysicsProcessDeltaTime()) await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);
+        float yawAfter = MathF.Abs(Raft.AngularVelocity.Y);
+        Raft.ForcedRow = 1f;
+        float relMax = 0f;
+        for (float s = 0; s < 20f; s += (float)GetPhysicsProcessDeltaTime())
+        {
+            await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);
+            var pp = Raft.GlobalPosition;
+            relMax = MathF.Max(relMax, (Raft.LinearVelocity - Raft.WaterVelocity(pp.X, pp.Z)).Length());
+        }
+        Raft.ForcedRow = null; Raft.ForcedSteer = null;
+        GD.Print($"STEER RESULT: oar turned the raft {turned:F0}° in 12 s (max {Mathf.RadToDeg(maxYawRate):F1}°/s), " +
+                 $"{Mathf.RadToDeg(yawAfter):F1}°/s left 8 s after letting go; sculling: {relMax:F2} m/s through the water");
         GD.Print($"DRIFT RESULT: travelled {start.DistanceTo(end):F0} m (z {start.Z:F0} → {end.Z:F0}), max speed {maxSpeed:F2} m/s, max tilt {maxTilt:F1}°, grounded {Raft.GroundedTime:F0} s");
         GetTree().Quit();
     }

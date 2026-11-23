@@ -205,6 +205,19 @@ public partial class PlayerController : CharacterBody3D
             if (body == _raft.Deck && !OnRaft) { Reparent(_raft, true); _yaw = Rotation.Y; return; }
             if (body != _raft.Deck && body != null && OnRaft) { Reparent(Main.Instance, true); _yaw = Rotation.Y; _atOar = false; return; }
         }
+        // Safety net: with several physics steps per frame (low fps) the deck collider can lag a step behind the
+        // raft and let us sink through it. Inside the deck's outline we can only be on it, so put us back.
+        if (OnRaft)
+        {
+            var lp = Position;
+            bool overDeck = MathF.Abs(lp.X) < Raft.Raft.Width * 0.5f - 0.1f && MathF.Abs(lp.Z) < Raft.Raft.Length * 0.5f - 0.1f;
+            if (overDeck && lp.Y < Raft.Raft.DeckTop - 0.05f && lp.Y > Raft.Raft.DeckTop - 1.5f)
+            {
+                Position = lp with { Y = Raft.Raft.DeckTop };
+                Velocity = Velocity with { Y = 0f };
+                return;
+            }
+        }
         // Fell off the deck into the water: leave the raft frame.
         if (OnRaft && GlobalPosition.Y < _raft.GlobalPosition.Y - 0.6f) { Reparent(Main.Instance, true); _yaw = Rotation.Y; _atOar = false; }
     }

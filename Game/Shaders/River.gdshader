@@ -25,13 +25,13 @@ uniform sampler2D ripple_small : filter_linear_mipmap_anisotropic, repeat_enable
 uniform sampler2D foam_tex : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform float large_scale = 9.0;      // metres per ripple_large tile
 uniform float small_scale = 2.3;
-uniform float flow_cycle = 2.2;       // seconds per flow-map phase
+uniform float flow_cycle = 1.4;       // seconds per flow-map phase (shorter = less stretching in shear)
 uniform float ripple_strength = 0.55;
 uniform vec2 wind = vec2(0.6, 0.25);  // m/s-ish, drives ripples on slow water
 
 // Water colour (a temperate, slightly turbid river)
 uniform vec3 absorption = vec3(0.40, 0.31, 0.66);    // per metre of path, rgb: blue goes first (tannins, silt)
-uniform vec3 scatter_color : source_color = vec3(0.085, 0.090, 0.050);
+uniform vec3 scatter_color : source_color = vec3(0.10, 0.10, 0.055);
 uniform float scatter_density = 0.55;                 // per metre
 uniform float turbidity = 1.0;
 uniform vec3 foam_color : source_color = vec3(0.86, 0.87, 0.84);
@@ -99,7 +99,8 @@ void fragment() {
 	float rough_water = smoothstep(0.35, 0.9, froude);   // riffles and rapids
 
 	// ------------------------------------------------------------- surface normal
-	float jitter = texture(foam_tex, xz * 0.013).r * 0.6;
+	// Phase jitter must be smooth: any fine detail here turns into marbled smears once multiplied by the flow.
+	float jitter = textureLod(foam_tex, xz * 0.0035, 7.0).r * 0.8;
 	vec3 nL = flow_normal(ripple_large, xz, flow, large_scale, flow_cycle, t, jitter);
 	vec3 nS = flow_normal(ripple_small, xz, flow * 1.1, small_scale, flow_cycle * 0.7, t, jitter + 0.25);
 	// Wind ripples: not carried by the current, strongest on slow wide water.

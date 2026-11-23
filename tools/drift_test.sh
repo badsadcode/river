@@ -5,4 +5,4 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 SECS=${1:-300}
-timeout ${TIMEOUT:-1800} godot --headless --path . --audio-driver Dummy -- --drift-test="$SECS" 2>&1 | grep -E "DRIFT|ERROR|error" || true
+timeout ${TIMEOUT:-1800} godot --headless --path . --audio-driver Dummy --fixed-fps 60 --disable-vsync -- --drift-test="$SECS" 2>&1 | grep -E "DRIFT|STEER|PLAYER|ERROR|error" || true

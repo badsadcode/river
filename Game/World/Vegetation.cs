@@ -112,6 +112,9 @@ public static class Vegetation
         /// <summary>Smooth-ish blob normals: point away from a centre (soft crowns).</summary>
         public void Blob(Vector3 a, Vector3 b, Vector3 c, Vector3 centre, Color col)
         {
+            // Keep every face pointing outwards (consistent winding lets us cull back faces: no shadow acne).
+            var fn = (b - a).Cross(c - a);
+            if (fn.Dot((a + b + c) / 3f - centre) < 0f) (b, c) = (c, b);
             int k = V.Count;
             V.Add(a); V.Add(c); V.Add(b);
             N.Add((a - centre).Normalized()); N.Add((c - centre).Normalized()); N.Add((b - centre).Normalized());

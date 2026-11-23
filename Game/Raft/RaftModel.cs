@@ -33,8 +33,9 @@ public static class RaftModel
                 Mesh = new CylinderMesh { TopRadius = r, BottomRadius = r * rng.Range(1.0f, 1.08f), Height = len, RadialSegments = 10, Rings = 1 },
                 MaterialOverride = Mat(bark, 0.95f),
                 Position = new Vector3((i + 0.5f) * W / logs - W * 0.5f, 0, rng.Range(-0.12f, 0.12f)),
-                Rotation = new Vector3(Mathf.Pi / 2f, 0, rng.Range(0f, 6.28f)),
             };
+            // Lie along z, spun about its own axis (setting Euler angles would tilt it sideways).
+            log.Basis = new Basis(Vector3.Right, Mathf.Pi / 2f) * new Basis(Vector3.Up, rng.Range(0f, 6.28f));
             visual.AddChild(log);
             // Cut ends: pale wood discs.
             foreach (float end in new[] { -0.5f, 0.5f })

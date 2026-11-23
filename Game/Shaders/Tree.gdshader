@@ -1,6 +1,6 @@
 // Trees (MultiMesh): vertex-coloured low-poly crowns, per-instance tint, gentle wind sway.
 shader_type spatial;
-render_mode cull_disabled, specular_schlick_ggx;
+render_mode cull_back, specular_schlick_ggx;
 
 uniform float sway = 0.035;
 uniform float translucency = 0.35;
