@@ -1,6 +1,6 @@
 # RIVER — Design Pillars
 
-*Bad Ideas Works · v0.2 · 2026-11-23 · with notes from Noor*
+*Bad Ideas Works · v0.3 · 2026-11-23 · with notes from Noor*
 *Engine: Godot 4.7.2 · C# · Forward+*
 
 > One raft. One river. It does not end.
@@ -36,8 +36,8 @@ from cheap jump scares. Survival matters but is texture, not a stat-management g
 canvas, brass instruments, glass plate cameras (maybe), steamboats on the lower reaches, telegraph only near
 towns. No GPS, no reliable maps.
 
-**OPEN:** how far the dark goes — purely natural (disease, madness, human cruelty), or a faint hint of the
-uncanny that is never confirmed?
+**Darkness is a setting** (`Mind.Darkness`: *Melancholy*, *Grim*, *Abyss*, and `Mind.Uncanny`: *Off*, *Hints*,
+*Open*), chosen per journey. At its darkest it is **really dark**. See [SANDBOX_SETTINGS.md](SANDBOX_SETTINGS.md).
 
 ---
 
@@ -199,6 +199,19 @@ across it. These drive flow, sandbars, fish habitat, the map and the journal.
 
 ---
 
+### 6.2 Going upstream (allowed, and hard)
+Downstream is the journey. Upstream is a deliberate, costly choice, usually up a tributary.
+- **The raft** can only be moved upstream by **tracking**: hauling it on ropes from the bank, a few hundred
+  metres an hour, impossible through gorges. Possible for short distances (back to a missed landing, into a
+  tributary mouth).
+- **A dinghy or canoe** (built or found) is the real way upstream: paddling and poling against the current,
+  lining it through rapids, carrying it around falls. Exhausting, slow, dangerous. Rewards: untouched side
+  valleys, rare species, the best secret places.
+- Physics does most of the work: the same flow field that carries you down fights you on the way up.
+  `River.UpstreamDifficulty` scales it.
+
+---
+
 ## 7. The land
 
 - Streamed in a **corridor** a few kilometres either side of the water, with real valley walls and distant
@@ -288,16 +301,26 @@ first keepsake shelf) → first secret place → survival → journal → expedi
 
 ---
 
-## 14. Open questions
+## 14. Decisions (Tom, 2026-11-23)
 
-1. **Scale & time:** real 1:1 distances (raft ≈ 4–8 km/h, slow and contemplative), or compressed distance so
-   landscapes change faster?
-2. **Solo, crew of NPC companions, or co-op?** (Curious Expedition has a crew; Thornwake has networking.)
-3. **How dark** does it get, and is there any hint of the uncanny?
-4. **Is there a goal?** Pure endless journey, a mystery downstream, or a sponsor's expedition with "chapters"?
-5. **Death:** permadeath roguelike runs (Curious Expedition) or one persistent journey?
-6. **Who is the player?** A naturalist, a disgraced explorer, a widow following a lost husband's map…?
-7. **Downstream only?** Heart of Darkness goes *upstream*. Do we ever allow long trips up tributaries?
+1. **Scale, time and most tuning are player-chosen** through `game_sandbox_settings.json` with presets
+   (Drifter / Explorer / Heart of Darkness / Custom). Spec: [SANDBOX_SETTINGS.md](SANDBOX_SETTINGS.md).
+2. **Solo.** No multiplayer: it can't be tested properly (ISP blocks hosting). Simplifies everything: no
+   networking, no authority model, free to pause.
+3. **Really dark** is possible, via the `Darkness` / `Uncanny` settings.
+4. **No fixed goal: make your own adventure.** The world offers places, people, mysteries and opportunities;
+   the player decides what the journey is about. (The sponsoring society stays an *optional* thread, never a
+   deadline.)
+5. **Two modes:** **Persistent** journey (default) and **Hard mode with permadeath**. In permadeath, later
+   journeys on the same seed can find your previous wreck and journal downstream (`ReturnOfTheDead`).
+6. **The player is an explorer.**
+7. **Upstream is allowed, and hard** (§6.2).
+
+## 15. Still open
+- Player background: who is this explorer, why are they on the river, and is that chosen or fixed?
+- NPC companions on the raft (solo player, but a dog? a hired hand? a stranger picked up on the bank?).
+- Late-game engine (salvaged steam launch) or always muscle and current?
+- Photography (glass plate camera) in the journal?
 
 ---
 
