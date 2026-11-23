@@ -13,6 +13,9 @@ Godot 4.7.2 · C# · Forward+ · by Bad Ideas Works.
 3. Open `project.godot` in Godot, press **Build** (hammer, top right), then **Run** (F5).
    The first launch generates the river (~35 s, "Generating the river…"); later launches load a cache.
 
+**Windows build (EXE):** `godot --headless --path . --export-release "Windows Desktop" dist/River/River.exe`
+(needs the 4.7.2 .NET export templates). Ship the whole `dist/River` folder: the exe needs `data_River_windows_x86_64`.
+
 ## Controls
 WASD walk · Shift run · Space jump / climb out of the water · **E** take/release the sweep oar (A/D steer, W/S scull)
 · hold **Q** to pole off the bottom (shallow water) · **G** anchor · **V** chase camera (mouse orbit, wheel zoom)
