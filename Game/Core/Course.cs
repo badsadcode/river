@@ -19,7 +19,7 @@ public sealed class CourseSettings
     public float Manning = 0.035f;
     public float StartEta = 100f;            // water level at the start (m); it only goes down
     // Features per 10 km of valley (the sandbox World.*Frequency settings will multiply these).
-    public float Lakes = 0.25f, Splits = 0.7f, Riffles = 0.9f, Tributaries = 0.6f;
+    public float Lakes = 0.25f, Splits = 0.7f, Riffles = 0.9f, Tributaries = 0.6f, Rapids = 0.3f;   // relative frequencies
     public float MinFeatureGap = 600f;       // m between features (room for a cut and its clearance)
     // Segments (cuts).
     public float MinSegment = 1500f, MaxSegment = 4000f, TargetSegment = 2500f;
@@ -27,7 +27,7 @@ public sealed class CourseSettings
     public float CutWindow = 200f;           // the river must cross the cut line once within ±this
 }
 
-public enum FeatureKind { Lake, Split, Riffle, Confluence }
+public enum FeatureKind { Lake, Split, Riffle, Confluence, Rapid }
 
 /// <summary>
 /// The character of a stretch of river, a few km long (blended into the next over 500 m): how strongly and how
@@ -133,8 +133,9 @@ public sealed class Course
     public void ExtendTo(double sigma)
     {
         // Order matters: cuts need the features around them, the valley and river need both.
-        ScheduleFeatures(sigma + 2.0 * Settings.MaxSegment + 3000.0);
+        // Reaches first: features look at them (riffles in gorges become rapids). Reaches don't depend on features.
         ScheduleReaches(sigma + 2.0 * Settings.MaxSegment + 3000.0);
+        ScheduleFeatures(sigma + 2.0 * Settings.MaxSegment + 3000.0);
         ScheduleCuts(sigma + Settings.MaxSegment + 1000.0);
         ExtendValley(sigma + Settings.MaxSegment + 2000.0);
         if (Count == 0) StartRiver();
@@ -146,7 +147,7 @@ public sealed class Course
     void ScheduleFeatures(double upTo)
     {
         var s = Settings;
-        float total = s.Lakes + s.Splits + s.Riffles + s.Tributaries;
+        float total = s.Lakes + s.Splits + s.Riffles + s.Tributaries + s.Rapids;
         if (total <= 0f) { _scheduledTo = upTo; return; }
         float meanGap = MathF.Max(200f, 10000f / total - s.MinFeatureGap);
         while (_scheduledTo < upTo)
@@ -157,17 +158,22 @@ public sealed class Course
             float pick = H(1) * total;
             FeatureKind kind = pick < s.Lakes ? FeatureKind.Lake
                 : pick < s.Lakes + s.Splits ? FeatureKind.Split
-                : pick < s.Lakes + s.Splits + s.Riffles ? FeatureKind.Riffle : FeatureKind.Confluence;
+                : pick < s.Lakes + s.Splits + s.Riffles ? FeatureKind.Riffle
+                : pick < s.Lakes + s.Splits + s.Riffles + s.Tributaries ? FeatureKind.Confluence : FeatureKind.Rapid;
             int side = H(3) < 0.5f ? -1 : 1;
             // A segment carries at most one tributary: confluences at least a segment (+ margins) apart.
             if (kind == FeatureKind.Confluence)
                 foreach (var prev in Features)
                     if (prev.Kind == FeatureKind.Confluence && start - prev.Mid < s.MaxSegment + 300.0) { kind = FeatureKind.Riffle; break; }
+            // In a gorge the river drops hard: its riffles are rapids.
+            if (kind == FeatureKind.Riffle && ReachAt(start + 150.0).Gorge > 0.5f) kind = FeatureKind.Rapid;
             CourseFeature f = kind switch
             {
                 FeatureKind.Lake => new(kind, start, start + 400.0 + 300f + 250f * H(2), 200f, side, 70f + 90f * H(4), s.Seed + 7000 + e),
                 FeatureKind.Split => new(kind, start, start + 240.0 + 60f * H(2), 60f, side, 17f, s.Seed + 7000 + e),
                 FeatureKind.Riffle => new(kind, start, start + 300.0 + 120f * H(2), 60f, side, 0f, s.Seed + 7000 + e),
+                // Rapids: 200–400 m of steep, narrow, bouldery water (CourseSegments.RapidRocks).
+                FeatureKind.Rapid => new(kind, start, start + 200.0 + 200f * H(2), 50f, side, 0f, s.Seed + 7000 + e),
                 // Size: share of Q added. Mostly creeks (+2–5 %), now and then a real river (up to +15 %).
                 _ => new(kind, start, start + 300.0, 150f, side, 0.02f + 0.13f * H(4) * H(4) * H(4), s.Seed + 7000 + e),
             };
@@ -309,6 +315,9 @@ public sealed class Course
     }
 
     /// <summary>Hydraulic half-width for the discharge (∝ Q^0.5, capped for the 1.2 km corridor), × the reach's width.</summary>
+    /// <summary>Extra friction slope in rapids, × the bed's (tuned so rapid segments calibrate like plain ones).</summary>
+    public static float RapidLoss = 0.25f;
+
     float BaseHalf(float q, in ReachParams reach) => MathF.Min(60f, 18f * MathF.Sqrt(q / Settings.StartDischarge)) * reach.Width;
 
     /// <param name="turn">−1 … 1: how sharply the river turns here (1 at a bend's apex), + turning left (inner bank left).</param>
@@ -318,6 +327,7 @@ public sealed class Course
         float lake = FeatureWeight(FeatureKind.Lake, sigma);
         float riffle = FeatureWeight(FeatureKind.Riffle, sigma);
         float split = FeatureWeight(FeatureKind.Split, sigma);
+        float rapid = FeatureWeight(FeatureKind.Rapid, sigma);
         float q = DischargeAt(sigma);
         float qr = q / s.StartDischarge;
         var reach = ReachAt(sigma);
@@ -341,11 +351,13 @@ public sealed class Course
         }
         hl += 17f * split; hr += 17f * split;
         hl *= 1f - 0.1f * riffle; hr *= 1f - 0.1f * riffle;
+        hl *= 1f - 0.1f * rapid; hr *= 1f - 0.1f * rapid;     // a rapid squeezes the river
         float depth = MathF.Min(6f, 2.6f * MathF.Pow(qr, 0.35f)) * (1f + 0.1f * Noise.Fbm1(_sAlong / 220f, s.Seed + 7))
                     * reach.Depth * (1f + 0.15f * apex * plain) * (1f + 0.35f * pinch);   // pools at bends, deep in pinches
         hl = MathF.Max(hl, 6f); hr = MathF.Max(hr, 6f);
         depth = MathUtil.Lerp(depth, 2f * depth, lake);
         depth = MathUtil.Lerp(depth, 1.05f, riffle);
+        depth = MathUtil.Lerp(depth, 1.3f, rapid);
 
         // Water level: friction slope from the same conveyance the 2D flow solver uses, ∫ h^(5/3) dy across the bed
         // profile segments carve (ReachGenerator.ProfileDepth), so Q = ∫h^(5/3)dy · √S / n. (The textbook A·R^(2/3)
@@ -356,7 +368,10 @@ public sealed class Course
         {
             float conv = SideConveyance(HalfLeft[^1], MaxDepth[^1]) + SideConveyance(HalfRight[^1], MaxDepth[^1]);
             float sf = Discharge[^1] * s.Manning / conv;
-            eta = Eta[^1] - sf * sf * Centerline.Step;
+            // A rapid's boulders and ledges hold the water back far more than its bed alone (the 2D solve sees them):
+            // extra head loss, so the course's level agrees with what its segment will compute.
+            float rocks = 1f + RapidLoss * FeatureWeight(FeatureKind.Rapid, Sigma[^1]);
+            eta = Eta[^1] - sf * sf * rocks * Centerline.Step;
         }
 
         Heading.Add(heading); HalfLeft.Add(hl); HalfRight.Add(hr); MaxDepth.Add(depth);
@@ -389,6 +404,7 @@ public sealed class Course
         float offset = Offset[^1];
         float lake = FeatureWeight(FeatureKind.Lake, sigma);
         float riffle = FeatureWeight(FeatureKind.Riffle, sigma);
+        float rapid = FeatureWeight(FeatureKind.Rapid, sigma);
         var reach = ReachAt(sigma);
         // The meanders' scale: the hydraulic width for the discharge and reach (not the breathing width, which would
         // feed back into the bends); a lake doesn't stretch the meanders.
@@ -399,7 +415,7 @@ public sealed class Course
         float straight = CutWeight(sigma);   // runs straighter through segment cuts
         float ampNoise = 0.8f * Noise.Fbm1(_sAlong / 900f, s.Seed + 11) + 0.35f * Noise.Fbm1(_sAlong / 260f, s.Seed + 15);
         float amp = Math.Clamp(reach.AmpBase + reach.AmpVar * ampNoise, 0.15f, 1.95f)
-                  * (1f - 0.92f * lake) * (1f - 0.6f * riffle) * (1f - 0.85f * straight);
+                  * (1f - 0.92f * lake) * (1f - 0.6f * riffle) * (1f - 0.7f * rapid) * (1f - 0.85f * straight);
         // Along the river (not the valley): ×16 widths here ≈ 10–14 widths along the valley, as real meanders.
         float wavelength = 16f * 2f * baseHalf * reach.Wavelength * MathF.Max(0.45f, 1f + 0.6f * Noise.Fbm1(_sAlong / 600f, s.Seed + 12)
                                                                                   + 0.25f * Noise.Fbm1(_sAlong / 170f, s.Seed + 16));

@@ -96,6 +96,7 @@ public static class CourseSegments
                 case FeatureKind.Lake: LakeIslands(c, f, spec, L, LDir); break;
                 case FeatureKind.Split: spec.Islands.Add(MakeIsland(c, c.RiverIndexAt(f.Mid), 0f, 55f, 100f, 13f, 2.6f, 0.2f, f.Seed, L, LDir)); break;
                 case FeatureKind.Riffle: RiffleRocks(c, f, spec, L); break;
+                case FeatureKind.Rapid: RapidRocks(c, f, spec, L); break;
                 case FeatureKind.Confluence:
                     var (trib, edge, q) = Tributary(c, f, frame, sizeX, sizeZ, L);
                     if (trib != null) { spec.Tributary = trib; inflows.Add(new Inflow(edge, 1, q)); }
@@ -181,6 +182,56 @@ public static class CourseSegments
             float l = rng.Range(-0.85f, 0.85f) * (rng.Next01() < 0.5f ? c.HalfLeft[i] : c.HalfRight[i]);
             var (lx, lz) = L(c.X[i] + rx * l, c.Z[i] + rz * l);
             spec.Rocks.Add(new Rock { X = lx, Z = lz, Radius = rng.Range(0.5f, 1.9f), Top = rng.Range(-0.5f, 0.5f), Seed = f.Seed + 100 + n });
+        }
+    }
+
+    /// <summary>
+    /// A rapid's boulders (≤ 44 rocks; the water shader shows 64): two ledges across the river, rocks 3.5–5 m apart just
+    /// under the surface that the water pours over, then big boulders scattered between, many breaking the surface. A chute stays clear
+    /// all the way down: a winding line (±30 % of the half-width) at least 4.5 m either side, so the raft has a way
+    /// through that a steersman can follow rather than a pinball table.
+    /// </summary>
+    static void RapidRocks(Course c, CourseFeature f, SegmentSpec spec, Func<double, double, (float, float)> L)
+    {
+        var rng = new Rng(f.Seed);
+        int a = c.RiverIndexAt(f.S0 + 25.0), b = c.RiverIndexAt(f.S1 - 25.0);
+        if (b <= a) return;
+        int budget = 44 - spec.Rocks.Count, n = 0;
+        float phase = rng.Range(0f, MathF.Tau);
+        float Chute(int i)
+        {
+            float t = (float)((c.Sigma[i] - f.S0) / (f.S1 - f.S0));
+            return 0.3f * MathF.Min(c.HalfLeft[i], c.HalfRight[i]) * MathF.Sin(MathF.PI * 1.3f * t + phase);
+        }
+        float ChuteHalf(int i) => MathF.Max(4.5f, 0.18f * MathF.Min(c.HalfLeft[i], c.HalfRight[i]));
+        void Put(int i, float lat, float radius, float top)
+        {
+            if (n >= budget) return;
+            if (MathF.Abs(lat - Chute(i)) < ChuteHalf(i) + radius) return;
+            float hw = lat < 0 ? c.HalfLeft[i] : c.HalfRight[i];
+            if (MathF.Abs(lat) > 0.9f * hw - radius) return;
+            var (rx, rz) = c.RiverRight(i);
+            var (lx, lz) = L(c.X[i] + rx * lat, c.Z[i] + rz * lat);
+            foreach (var o in spec.Rocks)
+                if ((o.X - lx) * (o.X - lx) + (o.Z - lz) * (o.Z - lz) < (o.Radius + radius + 0.6f) * (o.Radius + radius + 0.6f)) return;
+            spec.Rocks.Add(new Rock { X = lx, Z = lz, Radius = radius, Top = top, Seed = f.Seed + 100 + n });
+            n++;
+        }
+        // Ledges.
+        foreach (float tl in new[] { 0.3f + rng.Range(-0.05f, 0.05f), 0.64f + rng.Range(-0.05f, 0.05f) })
+        {
+            int i = a + (int)(tl * (b - a));
+            for (float lat = -c.HalfLeft[i]; lat < c.HalfRight[i]; lat += rng.Range(3.5f, 5f))
+                Put(Math.Clamp(i + rng.Range(-2, 3), a, b), lat, rng.Range(0.6f, 1.1f), rng.Range(-0.5f, -0.1f));   // just under: pour-overs
+        }
+        // Boulders.
+        for (int tries = 0; tries < 400 && n < budget; tries++)
+        {
+            int i = rng.Range(a, b);
+            float side = rng.Next01() < 0.5f ? -1f : 1f;
+            float lat = side * rng.Range(0.05f, 0.85f) * (side < 0 ? c.HalfLeft[i] : c.HalfRight[i]);
+            float r = 0.7f + 1.5f * rng.Next01() * rng.Next01();
+            Put(i, lat, r, rng.Range(-0.4f, 0.9f));
         }
     }
 

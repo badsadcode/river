@@ -28,6 +28,7 @@ public static class Vegetation
         bool real = trees != null && TreeLibrary.Loaded;
         int birch = TreeLibrary.IndexOf(TreeLibrary.Kind.Birch), oak = TreeLibrary.IndexOf(TreeLibrary.Kind.Oak);
         int pine = TreeLibrary.IndexOf(TreeLibrary.Kind.Pine), spruce = TreeLibrary.IndexOf(TreeLibrary.Kind.Spruce);
+        int willow = TreeLibrary.IndexOf(TreeLibrary.Kind.Willow);
         var boards = new Dictionary<(int, int, int), List<Transform3D>>();
         var root = new Node3D { Name = "Vegetation" };
         var mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://Game/Shaders/Tree.gdshader") };
@@ -82,11 +83,12 @@ public static class Vegetation
                 if (real && kind != 2)
                 {
                     // Species by habitat: spruce on the valley walls and in cool patches, pine on drier ground;
-                    // birch along the water and at wood edges (standing in for alder and willow until there are
-                    // packs for them), oak in the open floodplain.
+                    // weeping willows right at the water's edge (rivers and oxbows), leaning over it; birch along
+                    // the banks and at wood edges, oak in the open floodplain.
                     int sp = kind == 0
                         ? (wall > 0.35f || Noise.Fbm(px / 500f, pz / 500f, f.Seed + 5103, 2) > 0.05f ? spruce : pine)
-                        : (riparian > 0.25f || Noise.Fbm(px / 350f, pz / 350f, f.Seed + 5104, 2) > 0.2f ? birch : oak);
+                        : (willow >= 0 && shore < 12f && above < 3.5f && rng.Next01() < 0.6f ? willow
+                           : riparian > 0.25f || Noise.Fbm(px / 350f, pz / 350f, f.Seed + 5104, 2) > 0.2f ? birch : oak);
                     if (sp < 0) sp = kind == 0 ? Math.Max(spruce, pine) : Math.Max(birch, oak);
                     if (sp >= 0)
                     {

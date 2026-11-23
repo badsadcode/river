@@ -10,7 +10,8 @@ namespace River.Core;
 ///   • swell: a few long, low ripples everywhere (12–23 m, 1–2 cm)
 ///   • chop: short, choppier waves where the water is fast and shallow (Froude number), moving with time
 ///   • standing waves: in fast water the surface forms waves that stay put while the water rushes through them,
-///     crests across the current, wavelength 2πv²/g (≈ 5 m at 2.8 m/s), broken up across the flow
+///     crests across the current, wavelength 2πv²/g (≈ 5 m at 2.8 m/s), broken up across the flow; in rapids
+///     (fast, supercritical water) they grow into haystacks of up to ~0.37 m
 ///   • wind waves: three short trains (3–6 m, a few cm) spread around the wind, stronger in gusts and on deeper,
 ///     open water, damped in backwaters (calm = the eddy/lee field)
 ///   • boils: slow domes welling up in faster, deeper water and drifting with the current (two cross-faded phases)
@@ -71,7 +72,10 @@ public static class SurfaceWaves
             float dx = vx / speed, dz = vz / speed;
             float along = x * dx + z * dz, across = -x * dz + z * dx;
             float k = Math.Clamp(G / (speed * speed), 2f * MathF.PI / 8f, 2f * MathF.PI / 2.5f);
-            float amp = 0.13f * MathUtil.Smoothstep(0.45f, 1.0f, speed / MathF.Sqrt(G * MathF.Max(depth, 0.08f)));
+            float fr = speed / MathF.Sqrt(G * MathF.Max(depth, 0.08f));
+            // In rapids (fast and supercritical) the standing waves grow into haystacks up to ~0.37 m.
+            float amp = 0.13f * MathUtil.Smoothstep(0.45f, 1.0f, fr)
+                      + 0.24f * MathUtil.Smoothstep(1.6f, 3.0f, speed) * MathUtil.Smoothstep(0.8f, 1.3f, fr);
             float breakup = 0.55f + 0.45f * MathF.Sin(across * 0.9f + 1.7f * MathF.Sin(along * 0.23f));
             h += amp * breakup * MathF.Sin(along * k + 0.25f * MathF.Sin(t * 1.9f + across * 0.4f));
         }

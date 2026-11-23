@@ -34,8 +34,8 @@ public sealed class TreeSpecies
 /// </summary>
 public static class TreeLibrary
 {
-    public enum Kind { Birch, Oak, Pine, Spruce }
-    static readonly string[] PackNames = { "Birch", "Oak", "Pine", "Spruce" };
+    public enum Kind { Birch, Oak, Pine, Spruce, Willow }
+    static readonly string[] PackNames = { "Birch", "Oak", "Pine", "Spruce", "Weeping_willow" };
     /// <summary>Variants used per species (of the pack's 10): each costs memory and a MultiMesh per LOD.</summary>
     public const int VariantsPerSpecies = 5;
     const string Dir = "res://Assets/Trees/";

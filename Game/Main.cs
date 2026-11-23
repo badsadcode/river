@@ -22,6 +22,9 @@ namespace River;
 ///   --seconds=S            simulated seconds before capturing (raft drifting, etc.)
 ///   --regen                ignore the segment cache
 ///   --drift-test=S         headless: drift the raft S seconds with streaming and report (tools/drift_test.sh)
+///   --start=NAME           start the raft just above the first rapid, riffle, lake, split, confluence, or 400 m into the
+///                          first gorge, braided, … reach (playtesting; works in the exported game too)
+///   --no-trees             placeholder trees instead of the NoorForm packs
 ///   --water=a=1;b=2        override water shader uniforms (tuning), --nomist hide the mist
 /// </summary>
 public partial class Main : Node3D
@@ -110,17 +113,31 @@ public partial class Main : Node3D
         AddChild(Streamer);
         Streamer.Setup(cs, cacheDir, key, Env);
         Streamer.OnWaterMaterial = ApplyWaterOverrides;
+        // Where the raft starts: 300 m into the start segment, or just above the first feature asked for (--start=…).
+        var c = World.Course;
+        while (c.Cuts.Count <= StartSegment + 2) c.ExtendTo(c.Cuts[^1] + 1000.0);
+        _startSigma = c.Cuts[StartSegment] + 300.0;
+        int startK = StartSegment;
+        if (_args.TryGetValue("start", out var startAt))
+        {
+            double? s = StartAbove(startAt);
+            if (s is { } sigma)
+            {
+                _startSigma = sigma;
+                while (startK + 1 < c.Cuts.Count && c.Cuts[startK + 1] <= sigma) startK++;
+                GD.Print($"Starting above the first {startAt} at σ {sigma:F0} m, segment {startK}");
+            }
+            else GD.PushWarning($"--start={startAt}: nothing like that found");
+        }
         var sw = Stopwatch.StartNew();
-        Streamer.LoadSync(StartSegment, Capturing ? 1 : 0);
+        Streamer.LoadSync(startK, Capturing ? 1 : 0);
         GD.Print($"River ready around segment {StartSegment} in {sw.ElapsedMilliseconds} ms " +
                  $"({Streamer.SegmentsGenerated} generated, {Streamer.SegmentsFromCache} from cache)");
 
         FlyCam = new FreeCamera { Name = "FlyCam", Far = 9000f, Near = 0.08f, Fov = 70f };
         AddChild(FlyCam);
 
-        // The raft starts 300 m into the start segment, on the river's centre line, pointing downstream.
-        var c = World.Course;
-        _startSigma = c.Cuts[StartSegment] + 300.0;
+        // The raft starts on the river's centre line, pointing downstream.
         int i = c.RiverIndexAt(_startSigma);
         float h = c.Heading[i];
         var start = new Vector3((float)c.X[i], World.EtaAt(c.X[i], c.Z[i]) + 0.1f, (float)c.Z[i]);
@@ -195,6 +212,30 @@ public partial class Main : Node3D
                 GD.Print($"Shot: first {kind} at σ {f.Mid:F0} m, segment {k}");
                 return f;
             }
+        return null;
+    }
+
+    /// <summary>
+    /// --start=NAME: valley distance just above the first feature (lake, split, riffle, confluence, rapid: 150 m before
+    /// it) or reach (gorge, braided, …: 400 m into it) downstream of the usual start. Null if none within 80 km.
+    /// </summary>
+    double? StartAbove(string name)
+    {
+        var c = World.Course;
+        double from = c.Cuts[StartSegment];
+        c.ExtendTo(from + 80000.0);
+        if (Enum.TryParse<FeatureKind>(name, true, out var fk))
+            foreach (var f in c.Features)
+                if (f.Kind == fk && f.S0 - 150.0 > from) return f.S0 - 150.0;
+        if (Enum.TryParse<ReachKind>(name, true, out var rk))
+            foreach (var r in c.Reaches)
+                if (r.Kind == rk && r.S0 > from)
+                {
+                    // Not on a cut (the raft would start on a seam): nudge forward past it.
+                    double s = r.S0 + 400.0;
+                    foreach (double cut in c.Cuts) if (Math.Abs(s - cut) < 150.0) s = cut + 150.0;
+                    return s;
+                }
         return null;
     }
 
@@ -317,6 +358,23 @@ public partial class Main : Node3D
                 float dx = best.FlowX / spd, dz = best.FlowZ / spd;
                 FlyCam.LookAtPoint(OnWater(best.X - dx * 4f - dz * 4.5f, best.Z - dz * 4f + dx * 4.5f, 3.2f),
                                    OnWater(best.X + dx * 0.8f, best.Z + dz * 0.8f, 0f));
+                break;
+            }
+            case "rapid":
+            {
+                if (FindFeature(FeatureKind.Rapid) is not { } f) break;
+                // From the bank below the rapid's middle, looking up into it.
+                var p = At(f.Mid + 60.0); var q = At(f.Mid - 50.0);
+                float hw = p.hr;
+                var from = Ground(p.x + p.rx * (hw + 3f), p.z + p.rz * (hw + 3f), 2.2f);
+                FlyCam.LookAtPoint(from, OnWater(q.x, q.z, 0f));
+                break;
+            }
+            case "rapid_top":
+            {
+                if (FindFeature(FeatureKind.Rapid) is not { } f) break;
+                var p = At(f.S0 - 40.0); var q = At(f.Mid);
+                FlyCam.LookAtPoint(OnWater(p.x - p.tx * 30.0 + p.rx * 25.0, p.z - p.tz * 30.0 + p.rz * 25.0, 35f), OnWater(q.x, q.z, 0f));
                 break;
             }
             case "confluence":

@@ -247,6 +247,25 @@ public static class ReachGenerator
                 Array.Copy(res3.Eta, f.Eta, total);
                 ComputeVelocity(f, connected, s, velScale);
                 Log($"calibrated to the course: drop ratio {r:F3}, inlet now {DeepestEtaInRow(f, connected, 1) - s.InletEtaTarget:+0.000;-0.000} m off");
+
+                // Strongly nonlinear segments (a rapid's boulders) miss in that one linear step. Then iterate on
+                // converged solves: for converged Manning flow the drop goes as 1/K², so conveyance × √(drop ratio)
+                // each time. The state above is the converged one for conveyance × √r, so start from there.
+                float c = sr;
+                for (int pass = 0; pass < 3; pass++)
+                {
+                    float inNow = DeepestEtaInRow(f, connected, 1);
+                    if (MathF.Abs(inNow - s.InletEtaTarget) < 0.012f) break;
+                    float r2 = (inNow - s.OutletEta) / MathF.Max(0.01f, s.InletEtaTarget - s.OutletEta);
+                    if (float.IsNaN(r2)) break;
+                    c = Math.Clamp(c * MathF.Sqrt(Math.Clamp(r2, 0.5f, 2f)), 0.4f, 2.5f);
+                    for (int i = 0; i < total; i++) velScale[i] = keep[i] * c;
+                    problem.ConveyanceScale = velScale;
+                    var res4 = FlowSolver.Solve(problem, 3, m => Log("calibration+ " + m), f.Eta);
+                    Array.Copy(res4.Eta, f.Eta, total);
+                    ComputeVelocity(f, connected, s, velScale);
+                    Log($"recalibrated (converged, pass {pass + 1}): conveyance × {c:F3}, inlet now {DeepestEtaInRow(f, connected, 1) - s.InletEtaTarget:+0.000;-0.000} m off");
+                }
             }
         }
         Eddies.AddRecirculation(f, connected, lee, lineArr, nearIdx, lineOf, m => Log(m));

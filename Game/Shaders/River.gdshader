@@ -115,7 +115,8 @@ float wave_height(vec2 p, float t, vec2 v, float depth, float calm) {
 		vec2 d = v / speed;
 		float along = dot(p, d), across = -p.x * d.y + p.y * d.x;
 		float k = clamp(9.81 / (speed * speed), 6.2831853 / 8.0, 6.2831853 / 2.5);
-		float amp = 0.13 * smoothstep(0.45, 1.0, fr);
+		float amp = 0.13 * smoothstep(0.45, 1.0, fr)
+		          + 0.24 * smoothstep(1.6, 3.0, speed) * smoothstep(0.8, 1.3, fr);   // rapids: big haystacks
 		float breakup = 0.55 + 0.45 * sin(across * 0.9 + 1.7 * sin(along * 0.23));
 		h += amp * breakup * sin(along * k + 0.25 * sin(t * 1.9 + across * 0.4));
 	}

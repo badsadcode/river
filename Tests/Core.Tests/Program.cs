@@ -133,12 +133,12 @@ Console.WriteLine("Course:");
         if (!course.CrossesOnce(course.Cuts[k], cs.CutWindow)) cutsOk = false;
         cutsChecked++;
     }
-    var counts = new int[4];
+    var counts = new int[Enum.GetValues<FeatureKind>().Length];
     foreach (var f in course.Features) if (f.S1 < 50000.0) counts[(int)f.Kind]++;
     int end = course.Count - 1; while (end > 0 && course.Sigma[end] > 50000.0) end--;
     double riverKm = end * Centerline.Step / 1000.0;
     Console.WriteLine($"  {riverKm:F1} km of river over 50 km of valley (sinuosity {riverKm / 50.0:F2}) in {ms} ms; " +
-                      $"{counts[0]} lakes, {counts[1]} splits, {counts[2]} riffles, {counts[3]} confluences, {cutsChecked} cuts");
+                      $"{counts[0]} lakes, {counts[1]} splits, {counts[2]} riffles, {counts[3]} confluences, {counts[4]} rapids, {cutsChecked} cuts");
     Console.WriteLine($"  valley heading {minHead * 180 / MathF.PI:F0}°…{maxHead * 180 / MathF.PI:F0}° (0 = south, + = east); " +
                       $"tightest turn {tightestNormal:F0} m ({tightest:F0} m below confluences); " +
                       $"level {course.Eta[0]:F1} → {course.Eta[end]:F1} m; discharge {course.Discharge[0]:F0} → {course.Discharge[end]:F0} m³/s");
@@ -149,6 +149,7 @@ Console.WriteLine("Course:");
     Check(maxOffset < 450f, $"the meander belt stays within the corridor (max {maxOffset:F0} m from the valley axis)");
     Check(lengthsOk && cutsOk && cutsChecked >= 12, "segments are 1.5–4 km, cut in plain stretches the river crosses once");
     Check(counts[0] + counts[1] + counts[2] + counts[3] >= 8, "features along the way");
+    Check(counts[4] >= 1, $"rapids along the way ({counts[4]} in 50 km)");
 
     // Determinism: built in uneven steps, the same course.
     var stepped = new Course(cs);
@@ -217,6 +218,51 @@ Console.WriteLine("Segments:");
         Check(channels > 0 && channelsFlowing == channels, $"side channels carry a current downstream ({channelsFlowing}/{channels})");
     }
 
+    // The first rapid: faster than the river around it, a chute deep enough for a raft, water conserved.
+    {
+        var rc = new Course(new CourseSettings());
+        rc.ExtendTo(60000.0);
+        CourseFeature rapid = default; bool found = false;
+        foreach (var f in rc.Features) if (f.Kind == FeatureKind.Rapid) { rapid = f; found = true; break; }
+        Check(found, "a rapid within 60 km");
+        if (found)
+        {
+            int k = 1; while (rc.Cuts[k + 1] <= rapid.Mid) k++;
+            var spec = CourseSegments.Spec(rc, k);
+            var rf = ReachGenerator.Generate(spec, Environment.GetEnvironmentVariable("RIVER_LOG") != null ? m => Console.WriteLine("    " + m) : null);
+            double inSum = 0, outSum = 0; int inN = 0, outN = 0; float shallowChute = 0f;
+            for (int i = 0; i < rc.Count; i++)
+            {
+                if (rc.Sigma[i] < rc.Cuts[k] + 300 || rc.Sigma[i] > rc.Cuts[k + 1] - 300) continue;
+                var (lx, lz) = rf.Frame.ToLocal(rc.X[i], rc.Z[i]);
+                if (!rf.InDomain(lx, lz)) continue;
+                var (vx, vz) = rf.SampleVelocity(lx, lz);
+                double sp = Math.Sqrt(vx * vx + vz * vz);
+                bool inRapid = rc.Sigma[i] > rapid.S0 + 60 && rc.Sigma[i] < rapid.S1 - 60;
+                bool plain = rc.Sigma[i] < rapid.S0 - 300 || rc.Sigma[i] > rapid.S1 + 300;
+                if (inRapid) { inSum += sp; inN++; }
+                else if (plain) { outSum += sp; outN++; }
+            }
+            // The chute: its line through the rapid, as RapidRocks lays it out. Deep enough to float a raft all along.
+            float phase = new Rng(rapid.Seed).Range(0f, MathF.Tau);
+            for (int i = rc.RiverIndexAt(rapid.S0 + 25); i < rc.RiverIndexAt(rapid.S1 - 25); i++)
+            {
+                float t = (float)((rc.Sigma[i] - rapid.S0) / (rapid.S1 - rapid.S0));
+                float lat = 0.3f * MathF.Min(rc.HalfLeft[i], rc.HalfRight[i]) * MathF.Sin(MathF.PI * 1.3f * t + phase);
+                var (rx, rz) = rc.RiverRight(i);
+                var (lx, lz) = rf.Frame.ToLocal(rc.X[i] + rx * lat, rc.Z[i] + rz * lat);
+                float d = rf.SampleDepth(lx, lz);
+                if (shallowChute == 0f || d < shallowChute) shallowChute = d;
+            }
+            int rocksInRapid = spec.Rocks.Count;
+            double mIn = inSum / Math.Max(1, inN), mOut = outSum / Math.Max(1, outN);
+            Console.WriteLine($"  rapid at σ {rapid.S0:F0}–{rapid.S1:F0} m (segment {k}): {rocksInRapid} rocks, current {mIn:F2} m/s in it, {mOut:F2} m/s around it");
+            Check(mIn > 1.4 * mOut && mIn > 1.5 && mIn < 3.6, "the rapid runs much faster than the river around it");
+            Check(Math.Abs(rf.OutflowMeasured - rf.InflowTotal) < 0.03f * rf.InflowTotal, "no water lost in the rapid's segment");
+            Check(shallowChute > 0.5f, $"the chute floats a raft all the way down (shallowest {shallowChute:F2} m)");
+        }
+    }
+
     // Along each interior cut line, compare the two neighbours' independent solutions (before any blending).
     float worstEta = 0f, worstVel = 0f, worstLandFar = 0f, worstLandNear = 0f, worstBankVel = 0f, worstBankLand = 0f;
     double worstFlux = 0, worstFluxPair = 0;
@@ -257,11 +303,14 @@ Console.WriteLine("Segments:");
         {
             if (!world.SampleSegment(j - 1, vx + rx * t, vz + rz * t, out var a) || !world.SampleSegment(j, vx + rx * t, vz + rz * t, out var b)) continue;
             if (a.Water || b.Water) continue;
+            // Slope over 1 m across and along the valley (steep walls run either way; the grids are rotated apart).
             world.SampleSegment(j - 1, vx + rx * (t + 1), vz + rz * (t + 1), out var a2);
-            float dh = MathF.Abs(a.Height - b.Height), slope = MathF.Abs(a2.Height - a.Height);
+            world.SampleSegment(j - 1, vx + rx * t + tx, vz + rz * t + tz, out var a3);
+            float dh = MathF.Abs(a.Height - b.Height), slope = MathF.Max(MathF.Abs(a2.Height - a.Height), MathF.Abs(a3.Height - a.Height));
             if (NearShore(t)) { worstBankLand = MathF.Max(worstBankLand, dh); continue; }
             float excess = dh - slope * 2f * 0.5f;   // half a cell's worth of slope is interpolation, not a step
             if (Math.Abs(t - tRiver) > 80) worstLandFar = MathF.Max(worstLandFar, excess); else worstLandNear = MathF.Max(worstLandNear, excess);
+            if (Environment.GetEnvironmentVariable("RIVER_SEAMDBG") != null && Math.Abs(t - tRiver) > 80 && excess > 0.03f) Console.WriteLine($"    seam {j} t {t:F0} (river at {tRiver:F0}): {a.Height:F2} vs {b.Height:F2}, eta {a.Eta:F2}/{b.Eta:F2}");
         }
         double q = course.DischargeAt(cut);
         worstFlux = Math.Max(worstFlux, Math.Max(Math.Abs(fluxA - q), Math.Abs(fluxB - q)) / q);
