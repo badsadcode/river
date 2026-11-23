@@ -107,3 +107,25 @@ capped at 1,200 m³/s for the 1.2 km corridor. **Water level** from Manning over
 agrees with the segment flow solve (≈ 1.4 m/km here, as the prototype's solve). Known limit: with widths capped, a
 big river stays steep (≈ 3 km of drop per 500 km of valley); fine in float, revisit if the corridor widens.
 Checks in `Tests/Core.Tests` (50 km); 500 km × 3 seeds verified once (≈ 590 cuts, all valid). Map: `-- --course out.png`.
+
+## D14 — Independent segments and seams (streaming phase 2)
+`CourseSegments.Spec(course, k)` builds segment k from the course alone: a chord-aligned grid over cut k … cut k+1
+plus 150 m overlap each side and a 650 m corridor (sizes rounded to 32 m so the multigrid can coarsen); the river,
+islands (Tom's sketch in every lake, split islands, a gravel bar on the sharpest interior bend), riffle rocks and
+the tributary (≤ 1 per segment: confluences ≥ 4.3 km apart) are built in world coordinates, then moved into the frame.
+All generator noise (bed, banks, floodplain, valley walls, island tops) now samples **world** positions; the valley
+walls follow the course's axis (`Valley.ReliefAround`). The prototype's identity frame makes this exact (its
+fingerprint is unchanged). Making neighbours meet took three findings:
+1. **Course water level from the solver's conveyance.** The textbook A·R^(2/3) underrated the carved profile's
+   ∫h^(5/3)dy by ~1.6×: 3 m steps at seams. Now the course integrates the same profile (31 cm left).
+2. **Per-segment calibration.** The 2D solve still drops ~18 % more than the 1D course (bends, bed noise, lee
+   zones; ~25 % with riffle rocks). Each segment measures its own drop and re-solves once with conveyance × r
+   (K at the old slopes → lands on the target drop; velocities with × √r keep the solve's face fluxes, so mass is
+   conserved). Chain-free: it only compares itself with the course. Seam level step: 1.7 cm. +1.5 s per segment.
+3. **Land far from the river stands on the course's level** (`SegmentSpec.LevelAt`), not on the grid's nearest
+   water, which can be a different stretch of river on a neighbour's grid (18 cm → 2 cm).
+Remaining raw differences are rasterisation: two rotated 2 m grids draw a shore a cell apart (≤ 6 m from the shore:
+currents differ ≤ 15 cm/s, bank height ≤ 34 cm) and resolve a curved bank's flow a few degrees apart (≤ 8 cm/s).
+`RiverWorld` assigns each point to the segment between its cut lines and blends neighbours over ±120 m; blended,
+the current changes ≤ 2 cm/s per 2 m along the river across seams versus ≤ 9 cm/s in its own bends.
+Segment generation ≈ 3.7 s here. Checks in `Tests/Core.Tests` (segments 1–4 out of order); map `-- --world out.png`.

@@ -4,12 +4,13 @@ using System.IO.Compression;
 using River.Core;
 
 // Headless checks of the river generator. Exit code 0 = all pass.
-string mapPath = null, flowPath = null, coursePath = null;
+string mapPath = null, flowPath = null, coursePath = null, worldPath = null;
 for (int a = 0; a < args.Length; a++)
 {
     if (args[a] == "--map" && a + 1 < args.Length) mapPath = args[++a];
     else if (args[a] == "--flow" && a + 1 < args.Length) flowPath = args[++a];
     else if (args[a] == "--course" && a + 1 < args.Length) coursePath = args[++a];
+    else if (args[a] == "--world" && a + 1 < args.Length) worldPath = args[++a];
 }
 
 int failures = 0;
@@ -167,6 +168,110 @@ Console.WriteLine("Course:");
 }
 
 if (Array.IndexOf(args, "--sandbox-only") >= 0) { Console.WriteLine(failures == 0 ? "ALL PASS" : $"{failures} FAILED"); return failures == 0 ? 0 : 1; }
+
+// ---------------------------------------------------------------- segments of the endless course (≈ 15 s)
+Console.WriteLine("Segments:");
+{
+    var course = new Course(new CourseSettings());
+    var world = new RiverWorld(course);
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    foreach (int k in new[] { 3, 1, 4, 2 }) world.Add(k, ReachGenerator.Generate(CourseSegments.Spec(course, k)));   // out of order
+    Console.WriteLine($"  segments 1–4 ({course.Cuts[5] - course.Cuts[1]:F0} m of valley) generated out of order in {sw.ElapsedMilliseconds / 1000.0:F1} s");
+
+    // Along each interior cut line, compare the two neighbours' independent solutions (before any blending).
+    float worstEta = 0f, worstVel = 0f, worstLandFar = 0f, worstLandNear = 0f, worstBankVel = 0f, worstBankLand = 0f;
+    double worstFlux = 0, worstFluxPair = 0;
+    for (int j = 2; j <= 4; j++)
+    {
+        double cut = course.Cuts[j];
+        var (vx, vz) = course.ValleyPoint(cut);
+        float h = course.ValleyHeadingAt(cut);
+        double rx = MathF.Cos(h), rz = -MathF.Sin(h), tx = MathF.Sin(h), tz = MathF.Cos(h);
+        // The shore raster zone: ±6 m of where either grid's water edge is. The two rotated 2 m grids draw the shore a
+        // cell apart, so right there one is dry where the other has a few dm of water, and the flow along a stepped
+        // bank is deflected differently. Reported separately (blending smooths it out), not counted as a seam.
+        var shoreT = new System.Collections.Generic.List<double>();
+        bool? prevA = null, prevB = null;
+        for (double t = -600; t <= 600; t += 1.0)
+        {
+            if (!world.SampleSegment(j - 1, vx + rx * t, vz + rz * t, out var a) || !world.SampleSegment(j, vx + rx * t, vz + rz * t, out var b)) continue;
+            if ((prevA.HasValue && prevA != a.Water) || (prevB.HasValue && prevB != b.Water)) shoreT.Add(t);
+            prevA = a.Water; prevB = b.Water;
+        }
+        bool NearShore(double t) { foreach (double st in shoreT) if (Math.Abs(t - st) <= 6) return true; return false; }
+
+        double fluxA = 0, fluxB = 0, tRiver = 0; float deepest = 0f;
+        for (double t = -600; t <= 600; t += 1.0)
+        {
+            if (!world.SampleSegment(j - 1, vx + rx * t, vz + rz * t, out var a) || !world.SampleSegment(j, vx + rx * t, vz + rz * t, out var b)) continue;
+            if (a.Depth > deepest) { deepest = a.Depth; tRiver = t; }
+            fluxA += a.Depth * (a.VelX * tx + a.VelZ * tz);
+            fluxB += b.Depth * (b.VelX * tx + b.VelZ * tz);
+            if (a.Depth > 0.3f && b.Depth > 0.3f) worstEta = MathF.Max(worstEta, MathF.Abs(a.Eta - b.Eta));
+            float dv = MathF.Sqrt((a.VelX - b.VelX) * (a.VelX - b.VelX) + (a.VelZ - b.VelZ) * (a.VelZ - b.VelZ));
+            if (!NearShore(t) && a.Water && b.Water) worstVel = MathF.Max(worstVel, dv);
+            else if (a.Water || b.Water) worstBankVel = MathF.Max(worstBankVel, dv);
+        }
+        // Terrain, outside the shore zone, allowing for bilinear interpolation on steep, creased slopes (both grids
+        // sample the same functions at different points).
+        for (double t = -600; t <= 600; t += 1.0)
+        {
+            if (!world.SampleSegment(j - 1, vx + rx * t, vz + rz * t, out var a) || !world.SampleSegment(j, vx + rx * t, vz + rz * t, out var b)) continue;
+            if (a.Water || b.Water) continue;
+            world.SampleSegment(j - 1, vx + rx * (t + 1), vz + rz * (t + 1), out var a2);
+            float dh = MathF.Abs(a.Height - b.Height), slope = MathF.Abs(a2.Height - a.Height);
+            if (NearShore(t)) { worstBankLand = MathF.Max(worstBankLand, dh); continue; }
+            float excess = dh - slope * 2f * 0.5f;   // half a cell's worth of slope is interpolation, not a step
+            if (Math.Abs(t - tRiver) > 80) worstLandFar = MathF.Max(worstLandFar, excess); else worstLandNear = MathF.Max(worstLandNear, excess);
+        }
+        double q = course.DischargeAt(cut);
+        worstFlux = Math.Max(worstFlux, Math.Max(Math.Abs(fluxA - q), Math.Abs(fluxB - q)) / q);
+        worstFluxPair = Math.Max(worstFluxPair, Math.Abs(fluxA - fluxB) / q);
+    }
+    Console.WriteLine($"  seams (raw, before blending): level {worstEta * 100:F1} cm, current {worstVel * 100:F1} cm/s in the channel, " +
+                      $"terrain {worstLandFar * 100:F1} cm away from the river / {worstLandNear * 100:F1} cm near it (beyond interpolation), " +
+                      $"discharge {worstFlux:P1} off the course, {worstFluxPair:P1} between neighbours");
+    Console.WriteLine($"  within 6 m of the shore, where the two 2 m grids rasterise it a cell apart: current {worstBankVel * 100:F1} cm/s, " +
+                      $"terrain {worstBankLand * 100:F0} cm (blended away over {2 * RiverWorld.Blend:F0} m)");
+    // Blended (what the game sees): walking the river's centre line, the current and level change no faster across
+    // a seam than they do anyway along the plain river inside the segments.
+    float seamDv = 0f, plainDv = 0f, seamDeta = 0f, plainDeta = 0f;
+    int bhint = 1;
+    for (int j = 2; j <= 4; j++)
+    {
+        int a0 = course.RiverIndexAt(course.Cuts[j] - 200.0), a1 = course.RiverIndexAt(course.Cuts[j] + 200.0);
+        int p0 = course.RiverIndexAt(course.Cuts[j] + 400.0), p1 = course.RiverIndexAt(course.Cuts[j] + 800.0);
+        RiverSample prev = default; bool havePrev = false;
+        for (int i = Math.Min(a0, p0); i <= Math.Max(a1, p1); i++)
+        {
+            bool seam = i >= a0 && i <= a1, plain = i >= p0 && i <= p1;
+            if (!seam && !plain) { havePrev = false; continue; }
+            if (!world.Sample(course.X[i], course.Z[i], ref bhint, out var s) || !s.Water) { havePrev = false; continue; }
+            if (havePrev)
+            {
+                float dv = MathF.Sqrt((s.VelX - prev.VelX) * (s.VelX - prev.VelX) + (s.VelZ - prev.VelZ) * (s.VelZ - prev.VelZ));
+                float de = MathF.Abs(s.Eta - prev.Eta);
+                if (seam) { seamDv = MathF.Max(seamDv, dv); seamDeta = MathF.Max(seamDeta, de); }
+                else { plainDv = MathF.Max(plainDv, dv); plainDeta = MathF.Max(plainDeta, de); }
+            }
+            prev = s; havePrev = true;
+        }
+    }
+    Console.WriteLine($"  blended, along the river every 2 m: current changes ≤ {seamDv * 100:F1} cm/s at seams vs ≤ {plainDv * 100:F1} in plain river, " +
+                      $"level ≤ {seamDeta * 1000:F1} vs ≤ {plainDeta * 1000:F1} mm");
+    Check(worstEta < 0.03f, "the water level matches across seams (< 3 cm)");
+    // 10 cm/s ≈ 6° of direction at 1 m/s: two rotated 2 m grids resolve a curved bank's flow a few degrees apart.
+    Check(worstVel < 0.10f, "the current in the channel matches across seams (< 10 cm/s)");
+    Check(seamDv <= 1.5f * plainDv && seamDeta <= 1.5f * plainDeta, "blended, seams change the river no faster than its own bends do");
+    Check(worstLandFar < 0.05f && worstLandNear < 0.1f, "no terrain step at seams (beyond 2 m-grid interpolation)");
+    Check(worstFlux < 0.05 && worstFluxPair < 0.03, "discharge is conserved across seams");
+
+    world.TryGet(2, out var seg2);
+    var alone = ReachGenerator.Generate(CourseSegments.Spec(new Course(new CourseSettings()), 2));
+    Check(Fingerprint.Of(alone) == Fingerprint.Of(seg2), "a segment generated alone is identical (no chain between segments)");
+
+    if (worldPath != null) { WorldMap.Write(world, new[] { 1, 2, 3, 4 }, 4.0, worldPath); Console.WriteLine($"  world map: {worldPath}"); }
+}
 
 var settings = new ReachSettings();
 var field = ReachGenerator.Generate(settings, Console.WriteLine);
@@ -466,8 +571,7 @@ static class CourseMap
                 else if (f.Kind == FeatureKind.Split) { r = 60; g = 170; b = 90; }
             }
             // Draw the channel across its width (left and right banks differ in lakes).
-            float h0 = c.Heading[i];
-            double rx = Math.Cos(h0), rz = -Math.Sin(h0);
+            var (rx, rz) = c.RiverRight(i);
             for (double t = -c.HalfLeft[i]; t <= c.HalfRight[i]; t += Math.Max(mpp * 0.7, 1.0))
                 Disc(c.X[i] + rx * t, c.Z[i] + rz * t, mpp * 0.6, r, g, b);
         }
@@ -496,6 +600,58 @@ static class CourseMap
             double rx = Math.Cos(hv), rz = -Math.Sin(hv);
             for (double t = -600; t <= 600; t += mpp * 0.7) Disc(c.VX[vi] + rx * t, c.VZ[vi] + rz * t, mpp * 0.5, 220, 40, 40);
         }
+        MapRender.WritePng(path, w, h, px);
+    }
+}
+
+static class WorldMap
+{
+    /// <summary>Stitched top-down map of loaded segments, sampled through RiverWorld (blended seams), north up.</summary>
+    public static void Write(RiverWorld world, int[] segments, double mpp, string path)
+    {
+        double x0 = double.MaxValue, x1 = double.MinValue, z0 = double.MaxValue, z1 = double.MinValue;
+        foreach (int k in segments)
+        {
+            world.TryGet(k, out var f);
+            foreach (var (cx, cz) in new[] { (0f, 0f), (f.SizeX, 0f), (0f, f.SizeZ), (f.SizeX, f.SizeZ) })
+            {
+                var (wx, wz) = f.Frame.ToWorld(cx, cz);
+                x0 = Math.Min(x0, wx); x1 = Math.Max(x1, wx); z0 = Math.Min(z0, wz); z1 = Math.Max(z1, wz);
+            }
+        }
+        int w = (int)((x1 - x0) / mpp), h = (int)((z1 - z0) / mpp);
+        var samples = new RiverSample[w * h]; var has = new bool[w * h];
+        int hint = segments[0];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                has[y * w + x] = world.Sample(x0 + (x + 0.5) * mpp, z0 + (y + 0.5) * mpp, ref hint, out samples[y * w + x]);
+        var px = new byte[w * h * 3];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int i = y * w + x;
+                float r = 0.08f, g = 0.08f, b = 0.1f;
+                if (has[i])
+                {
+                    var s = samples[i];
+                    if (s.Water)
+                    {
+                        float d = MathF.Min(s.Depth / 5f, 1f), sp = MathF.Min(MathF.Sqrt(s.VelX * s.VelX + s.VelZ * s.VelZ) / 2.5f, 1f);
+                        r = 0.1f + 0.3f * sp; g = 0.35f + 0.4f * sp - 0.2f * d; b = 0.7f - 0.35f * d + 0.2f * sp;
+                        r += (1 - r) * s.Foam; g += (1 - g) * s.Foam; b += (1 - b) * s.Foam;
+                    }
+                    else
+                    {
+                        float hx = x + 1 < w && has[i + 1] ? samples[i + 1].Height - s.Height : 0f;
+                        float hz = y + 1 < h && has[i + w] ? samples[i + w].Height - s.Height : 0f;
+                        float shade = Math.Clamp(0.75f - 0.6f * (hx - hz), 0.3f, 1.1f);
+                        float above = s.Height - s.Eta, t = MathF.Min(above / 80f, 1f);
+                        r = (0.35f + 0.4f * t) * shade; g = (0.55f + 0.1f * t) * shade; b = (0.25f + 0.35f * t) * shade;
+                        if (above < 0.8f) { r = 0.8f * shade; g = 0.74f * shade; b = 0.55f * shade; }
+                    }
+                }
+                px[i * 3] = (byte)(Math.Clamp(r, 0, 1) * 255); px[i * 3 + 1] = (byte)(Math.Clamp(g, 0, 1) * 255); px[i * 3 + 2] = (byte)(Math.Clamp(b, 0, 1) * 255);
+            }
         MapRender.WritePng(path, w, h, px);
     }
 }

@@ -14,13 +14,14 @@ Studio motto #001: *code shall remain understandable to whichever AI inherits th
 * Commit small, push often. No pull requests unless Tom asks. Never rewrite pushed history.
 * Keep the headless generator tests passing:
   `dotnet run --project Tests/Core.Tests -c Release` (add `-- --map out.png` for a top-down map, `--flow out.png` for the current and eddies,
-  `--course out.png` for a 50 km map of the endless course).
+  `--course out.png` for a 50 km map of the endless course, `--world out.png` for 4 stitched segments).
+  The full run takes ~25 s (segments 1–4 are generated).
 * Shaders: Godot does not allow `return` in `fragment()`. After shader changes, run a capture and grep the log for
   `SHADER ERROR`.
 
 ## Layout
 * `Game/Core/` — pure C# (no Godot types): noise, centre lines, islands, the endless `Course` (1D journey),
-  `SegmentSpec`/`Frame` (one segment's slice), the segment generator (`ReachGenerator`), the flow solver, eddies,
+  `SegmentSpec`/`Frame`/`CourseSegments` (one segment's slice), `RiverWorld` (segments as one world), the segment generator (`ReachGenerator`), the flow solver, eddies,
   surface waves, the field container and its cache. `PrototypeCourse` is the hand-made reach the game still uses.
   Testable headlessly. Streaming plan: `docs/STREAMING.md`.
 * `Game/World/` — Godot side of the world: field → GPU textures, terrain, water meshes, vegetation, environment.

@@ -23,6 +23,25 @@ public sealed class SegmentSpec
     public List<Rock> Rocks = new();
     public Inflow[] Inflows = Array.Empty<Inflow>();
     public float OutletEta;                         // water level held along the downstream edge (m)
+    /// <summary>
+    /// The course's water level where the river enters (NaN = none, the prototype). If set, the segment calibrates its
+    /// friction so its own solve drops from this level to <see cref="OutletEta"/>: neighbours then meet at seams.
+    /// </summary>
+    public float InletEtaTarget = float.NaN;
     public float Manning = 0.035f, RefSlope = 0.0005f;
     public int ReferencePicardSteps;                // tests: > 0 = single-level solve with this many nonlinear steps
+    /// <summary>
+    /// For segments of the endless course: world position → (σ along the valley, signed offset from its axis), so the
+    /// valley walls follow the course. Null for the prototype (straight valley along z). The int is a search hint.
+    /// </summary>
+    public ValleyLookup ValleyAt;
+    /// <summary>
+    /// For segments of the endless course: the course's water level at valley distance σ. Land far from the river
+    /// (beyond ~250 m) is built on this rather than on the nearest water of this grid, which can be a different
+    /// stretch of river in a neighbour's grid. Null for the prototype.
+    /// </summary>
+    public Func<double, float> LevelAt;
 }
+
+/// <summary>World position → (σ along the course's valley, signed offset from its axis); hint speeds up the search.</summary>
+public delegate (double sigma, float offset) ValleyLookup((double x, double z) world, ref int hint);

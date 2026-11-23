@@ -33,6 +33,10 @@ public static class ReachGenerator
     {
         var sw = Stopwatch.StartNew();
         void Log(string m) => log?.Invoke($"[{sw.ElapsedMilliseconds,6} ms] {m}");
+        // World position of a grid point, for noise: overlapping segments must sample the same noise.
+        // (The prototype's identity frame gives exactly the grid coordinates.)
+        var frame = s.Frame;
+        (float, float) Wn(float x, float z) { var (a, b) = frame.ToWorld(x, z); return ((float)a, (float)b); }
 
         int nx = (int)MathF.Round(s.SizeX / s.Cell) + 1, nz = (int)MathF.Round(s.SizeZ / s.Cell) + 1, total = nx * nz;
         var f = new ReachField
@@ -98,8 +102,9 @@ public static class ReachGenerator
             float x = (i % nx) * s.Cell, z = (i / nx) * s.Cell;
             float t = -f.ShoreDist[i];
             float h = 0f;
-            if (insideMain[i]) h = MathF.Max(h, ProfileDepth(f.Main, mainIdx[i], x, z, t, s.Seed));
-            if (insideTrib[i]) h = MathF.Max(h, ProfileDepth(f.Tributary, tribIdx[i], x, z, t, s.Seed + 5));
+            var (wx, wz) = Wn(x, z);
+            if (insideMain[i]) h = MathF.Max(h, ProfileDepth(f.Main, mainIdx[i], x, z, t, s.Seed, wx, wz));
+            if (insideTrib[i]) h = MathF.Max(h, ProfileDepth(f.Tributary, tribIdx[i], x, z, t, s.Seed + 5, wx, wz));
             if (!insideMain[i] && !insideTrib[i]) h = 0.3f;
             f.Depth[i] = MathF.Max(h, 0.06f);
         }
@@ -182,6 +187,30 @@ public static class ReachGenerator
         var res2 = FlowSolver.Solve(problem, 1, m => Log("lee " + m), f.Eta);
         Array.Copy(res2.Eta, f.Eta, total);
         ComputeVelocity(f, connected, s, keep);
+
+        // ------------------------------------------------------------ 7c. calibration to the course (streaming segments)
+        // The 1D course can't see every 2D loss (bends, bed roughness, lee zones, rocks), so a segment's own drop
+        // differs from the course's by ~15–25 %, which would leave a step at every seam. Measure the ratio r and
+        // re-solve once from the current answer with conveyance × r: one linear solve with K taken at the old slopes
+        // lands on the target drop, and the matching consistent conveyance at the new slopes is × √r (used for the
+        // velocities, so face fluxes equal the solve's and mass stays conserved).
+        if (!float.IsNaN(s.InletEtaTarget))
+        {
+            float inEta = DeepestEtaInRow(f, connected, 1);
+            float r = (inEta - s.OutletEta) / MathF.Max(0.01f, s.InletEtaTarget - s.OutletEta);
+            if (!float.IsNaN(r) && MathF.Abs(r - 1f) > 0.002f)
+            {
+                r = Math.Clamp(r, 0.5f, 2f);
+                var solveScale = new float[total]; var velScale = new float[total];
+                float sr = MathF.Sqrt(r);
+                for (int i = 0; i < total; i++) { solveScale[i] = keep[i] * r; velScale[i] = keep[i] * sr; }
+                problem.ConveyanceScale = solveScale;
+                var res3 = FlowSolver.Solve(problem, 1, m => Log("calibration " + m), f.Eta);
+                Array.Copy(res3.Eta, f.Eta, total);
+                ComputeVelocity(f, connected, s, velScale);
+                Log($"calibrated to the course: drop ratio {r:F3}, inlet now {DeepestEtaInRow(f, connected, 1) - s.InletEtaTarget:+0.000;-0.000} m off");
+            }
+        }
         Eddies.AddRecirculation(f, connected, lee, lines, nearestIdx, lineOf, m => Log(m));
         Log($"flow with lee zones, outflow {f.OutflowMeasured:F1} m³/s");
         // Each rock's approaching current: the mean on a ring around it (at the rock itself the water is held back).
@@ -237,19 +266,30 @@ public static class ReachGenerator
             for (int pass = 0; pass < 2; pass++) { BoxBlur(src, tmp, nx, nz, 6, true); BoxBlur(tmp, src, nx, nz, 6, false); }
             Array.Copy(src, inner, total);
         }
+        int valleyHint = 0;
         for (int i = 0; i < total; i++)
         {
             float x = (i % nx) * s.Cell, z = (i / nx) * s.Cell;
             if (f.Water[i]) { f.Height[i] = f.Eta[i] - f.Depth[i]; continue; }
+            var (wx, wz) = Wn(x, z);   // noise and valley walls at the world position: overlapping segments agree
             float dW = MathF.Max(f.ShoreDist[i], 0.2f);
             float inn = inner[i] * MathUtil.Smoothstep(70f, 25f, dW);
             float a = MathF.Abs(inn);
-            float bankH = MathUtil.Lerp(1.3f, inn > 0 ? 0.45f : 3.1f, a) * (1f + 0.3f * Noise.Fbm(x / 60f, z / 60f, s.Seed + 91, 2));
+            float bankH = MathUtil.Lerp(1.3f, inn > 0 ? 0.45f : 3.1f, a) * (1f + 0.3f * Noise.Fbm(wx / 60f, wz / 60f, s.Seed + 91, 2));
             float bankW = MathUtil.Lerp(7f, inn > 0 ? 34f : 3.5f, a);
             float rise = bankH * MathF.Pow(MathUtil.Clamp01(dW / bankW), MathUtil.Lerp(1f, inn < 0 ? 0.55f : 1.25f, a));
-            float flood = Valley.FloodplainRelief(x, z, s.Seed) * MathUtil.Smoothstep(4f, 60f, dW);
-            float h = f.Eta[i] + rise + flood + Valley.Relief(x, z, s.Seed, s.SizeX);
-            f.Height[i] = h;
+            float flood = Valley.FloodplainRelief(wx, wz, s.Seed) * MathUtil.Smoothstep(4f, 60f, dW);
+            float walls, baseLevel = f.Eta[i];
+            if (s.ValleyAt == null) walls = Valley.Relief(wx, wz, s.Seed, s.SizeX);      // prototype: straight valley along z
+            else
+            {
+                var (sigma, offset) = s.ValleyAt(f.Frame.ToWorld(x, z), ref valleyHint);   // endless course: around its axis
+                walls = Valley.ReliefAround(MathF.Abs(offset), (float)sigma, wx, wz, s.Seed);
+                // Far from water, stand on the course's level along the valley (shared by every segment), not on
+                // this grid's nearest water.
+                if (s.LevelAt != null) baseLevel = MathUtil.Lerp(f.Eta[i], s.LevelAt(sigma), MathUtil.Smoothstep(60f, 250f, dW));
+            }
+            f.Height[i] = baseLevel + rise + flood + walls;
         }
         foreach (var isl in f.Islands)
             ForNodesNear(f, isl.X, isl.Z, MathF.Max(isl.LengthDown, isl.LengthUp) * 1.4f + 10f, i =>
@@ -258,8 +298,9 @@ public static class ReachGenerator
                 float x = (i % nx) * s.Cell, z = (i / nx) * s.Cell;
                 float sdf = isl.Sdf(x, z);
                 if (sdf > 4f) return;
+                var (wx, wz) = Wn(x, z);
                 float top = f.Eta[i] + 0.15f + isl.MaxHeight * MathF.Pow(MathUtil.Clamp01(-sdf / (isl.HalfWidth * 0.8f)), 0.7f)
-                            + 0.25f * Noise.Fbm(x / 14f, z / 14f, isl.Seed, 2) * MathUtil.Clamp01(-sdf / 6f);
+                            + 0.25f * Noise.Fbm(wx / 14f, wz / 14f, isl.Seed, 2) * MathUtil.Clamp01(-sdf / 6f);
                 float k = MathUtil.Smoothstep(4f, -2f, sdf);
                 f.Height[i] = MathUtil.Lerp(f.Height[i], MathF.Min(f.Height[i], top), k);
             });
@@ -322,7 +363,7 @@ public static class ReachGenerator
     }
 
     /// <summary>Cross-section depth at distance t from the shore: steep on the outside of bends, shelving inside.</summary>
-    static float ProfileDepth(Centerline c, int k, float x, float z, float t, int seed)
+    static float ProfileDepth(Centerline c, int k, float x, float z, float t, int seed, float wx, float wz)
     {
         float dx = x - c.X[k], dz = z - c.Z[k];
         var (rx, rz) = c.Right(k);
@@ -333,9 +374,22 @@ public static class ReachGenerator
         float tau = MathF.Max(3f, halfSide * frac);
         float u = MathUtil.Clamp01(t / tau);
         float prof = 1f - (1f - u) * (1f - u);
-        float var = 1f + 0.12f * Noise.Fbm(x / 45f, z / 45f, seed + 31, 3);
-        float dunes = 0.06f * Noise.Gradient(x / 9f, z / 9f, seed + 32) * u;
+        // Noise at the world position (wx, wz), so overlapping segments carve the same bed.
+        float var = 1f + 0.12f * Noise.Fbm(wx / 45f, wz / 45f, seed + 31, 3);
+        float dunes = 0.06f * Noise.Gradient(wx / 9f, wz / 9f, seed + 32) * u;
         return c.MaxDepth[k] * prof * var + dunes;
+    }
+
+    /// <summary>Water level at the deepest water node of a grid row (the river's thalweg there).</summary>
+    static float DeepestEtaInRow(ReachField f, bool[] active, int row)
+    {
+        int best = -1; float bd = 0f;
+        for (int x = 0; x < f.Nx; x++)
+        {
+            int i = row * f.Nx + x;
+            if (active[i] && f.Depth[i] > bd) { bd = f.Depth[i]; best = i; }
+        }
+        return best < 0 ? float.NaN : f.Eta[best];
     }
 
     static float Distribute(ReachField f, float[] source, bool[] connected, Func<int, bool> pick, float q)

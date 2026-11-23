@@ -118,6 +118,10 @@ public sealed class Course
                 : pick < s.Lakes + s.Splits ? FeatureKind.Split
                 : pick < s.Lakes + s.Splits + s.Riffles ? FeatureKind.Riffle : FeatureKind.Confluence;
             int side = H(3) < 0.5f ? -1 : 1;
+            // A segment carries at most one tributary: confluences at least a segment (+ margins) apart.
+            if (kind == FeatureKind.Confluence)
+                foreach (var prev in Features)
+                    if (prev.Kind == FeatureKind.Confluence && start - prev.Mid < s.MaxSegment + 300.0) { kind = FeatureKind.Riffle; break; }
             CourseFeature f = kind switch
             {
                 FeatureKind.Lake => new(kind, start, start + 400.0 + 300f + 250f * H(2), 200f, side, 70f + 90f * H(4), s.Seed + 7000 + e),
@@ -179,6 +183,28 @@ public sealed class Course
         }
     }
 
+    /// <summary>Point on the valley axis at σ (linear between the 10 m samples).</summary>
+    public (double x, double z) ValleyPoint(double sigma)
+    {
+        double f = Math.Clamp(sigma / ValleyStep, 0.0, VX.Count - 1.001);
+        int i = (int)f; double t = f - i;
+        return (VX[i] + (VX[i + 1] - VX[i]) * t, VZ[i] + (VZ[i + 1] - VZ[i]) * t);
+    }
+
+    /// <summary>Valley heading at σ (radians, 0 = south, + towards east).</summary>
+    public float ValleyHeadingAt(double sigma) => VHeading[(int)Math.Clamp(sigma / ValleyStep, 0.0, VHeading.Count - 1)];
+
+    /// <summary>First river sample at or past valley distance σ (σ is nearly monotone; at features and cuts strictly).</summary>
+    public int RiverIndexAt(double sigma)
+    {
+        int lo = 0, hi = Count - 1;
+        while (lo < hi) { int mid = (lo + hi) / 2; if (Sigma[mid] < sigma) lo = mid + 1; else hi = mid; }
+        return lo;
+    }
+
+    /// <summary>The river's right-hand normal at sample i (looking downstream), as <see cref="Centerline.Right"/>.</summary>
+    public (double x, double z) RiverRight(int i) => (-MathF.Cos(Heading[i]), MathF.Sin(Heading[i]));
+
     /// <summary>Projection of (x, z) on the valley near index hint: σ and signed offset (+ = valley's right).</summary>
     public (double sigma, float offset, int idx) ProjectOnValley(double x, double z, int hint)
     {
@@ -230,19 +256,39 @@ public sealed class Course
         depth = MathUtil.Lerp(depth, 2f * depth, lake);
         depth = MathUtil.Lerp(depth, 1.05f, riffle);
 
-        // Water level: Manning over the cross-section (mean depth ≈ 0.62 × max for the bed profile we carve).
+        // Water level: friction slope from the same conveyance the 2D flow solver uses, ∫ h^(5/3) dy across the bed
+        // profile segments carve (ReachGenerator.ProfileDepth), so Q = ∫h^(5/3)dy · √S / n. (The textbook A·R^(2/3)
+        // underestimates this profile's conveyance by ~1.6×, which put metres of water-level step at every seam.)
         float eta;
         if (Eta.Count == 0) eta = s.StartEta;
         else
         {
-            float width = HalfLeft[^1] + HalfRight[^1], meanD = 0.62f * MaxDepth[^1];
-            float area = width * meanD, radius = area / (width + 2f * meanD);
-            float sf = Discharge[^1] * s.Manning / (area * MathF.Pow(radius, 2f / 3f));
+            float conv = SideConveyance(HalfLeft[^1], MaxDepth[^1]) + SideConveyance(HalfRight[^1], MaxDepth[^1]);
+            float sf = Discharge[^1] * s.Manning / conv;
             eta = Eta[^1] - sf * sf * Centerline.Step;
         }
 
         Heading.Add(heading); HalfLeft.Add(hl); HalfRight.Add(hr); MaxDepth.Add(depth);
         Discharge.Add(q); Eta.Add(eta); Sigma.Add(sigma); Offset.Add(offset);
+    }
+
+    /// <summary>∫₀^1 (1 − (1 − u)²)^(5/3) du: the shelving part of the carved bed profile, in conveyance terms.</summary>
+    static readonly float ShelfIntegral = ComputeShelfIntegral();
+    static float ComputeShelfIntegral()
+    {
+        double sum = 0; const int n = 2000;
+        for (int i = 0; i < n; i++) { double u = (i + 0.5) / n, p = 1 - (1 - u) * (1 - u); sum += Math.Pow(p, 5.0 / 3.0); }
+        return (float)(sum / n);
+    }
+
+    /// <summary>
+    /// Conveyance (∫ h^(5/3) dy) of one side of the channel, half-width <paramref name="half"/>, deepest depth
+    /// <paramref name="depth"/>: shelving over τ = max(3, 0.55 × half) from the shore (a straight reach), then flat.
+    /// </summary>
+    static float SideConveyance(float half, float depth)
+    {
+        float tau = MathF.Min(half, MathF.Max(3f, 0.55f * half));
+        return MathF.Pow(depth, 5f / 3f) * (tau * ShelfIntegral + (half - tau));
     }
 
     void StepRiver()
