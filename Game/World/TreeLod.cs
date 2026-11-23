@@ -72,6 +72,20 @@ public partial class TreeLod : Node3D
     }
 
     public void Add(int k, TreeSet s) { _sets[k] = s; _dirty = true; }
+
+    /// <summary>The tree of a species nearest to a point (screenshots, debugging); null if none is loaded.</summary>
+    public Vector3? Nearest(int species, Vector3 near)
+    {
+        Vector3? best = null; float bd = float.MaxValue;
+        foreach (var set in _sets.Values)
+            for (int i = 0; i < set.Xf.Length; i++)
+            {
+                if (TreeLibrary.All[set.Id[i]].Species != species) continue;
+                float d = set.Xf[i].Origin.DistanceSquaredTo(near);
+                if (d < bd) { bd = d; best = set.Xf[i].Origin; }
+            }
+        return best;
+    }
     public void Remove(int k) { if (_sets.Remove(k)) _dirty = true; }
 
     public override void _Process(double delta)

@@ -36,7 +36,7 @@
 3. **Endless streaming**: phases 0–3 done: the game streams the endless course around the raft ([STREAMING.md](STREAMING.md),
    D12–D15). Next: floating origin (phase 4: float precision past ~20 km), proper horizon/mist/saves (phase 5).
 4. **River variety**: tiers 1–2 done (D16: reach types, breathing widths, bars, bank character; D17: gorges, braided
-   reaches, side channels, oxbow lakes, snags). Next: rapids & a waterfall with portage, island labyrinths, reeds.
+   reaches, side channels, oxbow lakes, snags; D19: rapids). Next: a waterfall with portage, island labyrinths, reeds.
 5. Water: wakes around the raft and the oar blade, splash particles at rocks, underwater view when swimming,
    rain rings (Thornwake has rain rings and wakes worth porting).
 6. Art: real trees done (D18: NoorForm birch/oak/pine/spruce); next: alder/willow packs for the banks, real

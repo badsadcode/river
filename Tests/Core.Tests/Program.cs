@@ -230,7 +230,7 @@ Console.WriteLine("Segments:");
             int k = 1; while (rc.Cuts[k + 1] <= rapid.Mid) k++;
             var spec = CourseSegments.Spec(rc, k);
             var rf = ReachGenerator.Generate(spec, Environment.GetEnvironmentVariable("RIVER_LOG") != null ? m => Console.WriteLine("    " + m) : null);
-            double inSum = 0, outSum = 0; int inN = 0, outN = 0; float shallowChute = 0f;
+            double inSum = 0, outSum = 0, foamIn = 0, frIn = 0; int inN = 0, outN = 0; float shallowChute = 0f;
             for (int i = 0; i < rc.Count; i++)
             {
                 if (rc.Sigma[i] < rc.Cuts[k] + 300 || rc.Sigma[i] > rc.Cuts[k + 1] - 300) continue;
@@ -240,7 +240,7 @@ Console.WriteLine("Segments:");
                 double sp = Math.Sqrt(vx * vx + vz * vz);
                 bool inRapid = rc.Sigma[i] > rapid.S0 + 60 && rc.Sigma[i] < rapid.S1 - 60;
                 bool plain = rc.Sigma[i] < rapid.S0 - 300 || rc.Sigma[i] > rapid.S1 + 300;
-                if (inRapid) { inSum += sp; inN++; }
+                if (inRapid) { inSum += sp; inN++; foamIn += rf.Sample(rf.Foam, lx, lz); frIn += sp / Math.Sqrt(9.81 * Math.Max(rf.SampleDepth(lx, lz), 0.08)); }
                 else if (plain) { outSum += sp; outN++; }
             }
             // The chute: its line through the rapid, as RapidRocks lays it out. Deep enough to float a raft all along.
@@ -256,7 +256,7 @@ Console.WriteLine("Segments:");
             }
             int rocksInRapid = spec.Rocks.Count;
             double mIn = inSum / Math.Max(1, inN), mOut = outSum / Math.Max(1, outN);
-            Console.WriteLine($"  rapid at σ {rapid.S0:F0}–{rapid.S1:F0} m (segment {k}): {rocksInRapid} rocks, current {mIn:F2} m/s in it, {mOut:F2} m/s around it");
+            Console.WriteLine($"  rapid at σ {rapid.S0:F0}–{rapid.S1:F0} m (segment {k}): {rocksInRapid} rocks, current {mIn:F2} m/s in it, {mOut:F2} m/s around it; foam {foamIn / Math.Max(1, inN):F2}, Froude {frIn / Math.Max(1, inN):F2} along its centre");
             Check(mIn > 1.4 * mOut && mIn > 1.5 && mIn < 3.6, "the rapid runs much faster than the river around it");
             Check(Math.Abs(rf.OutflowMeasured - rf.InflowTotal) < 0.03f * rf.InflowTotal, "no water lost in the rapid's segment");
             Check(shallowChute > 0.5f, $"the chute floats a raft all the way down (shallowest {shallowChute:F2} m)");

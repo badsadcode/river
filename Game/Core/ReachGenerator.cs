@@ -569,6 +569,8 @@ public static class ReachGenerator
             float h = MathF.Max(f.Depth[i], 0.05f);
             float froude = sp / MathF.Sqrt(9.81f * h);
             float v = 0.55f * MathUtil.Clamp01((froude - 0.5f) / 0.6f);
+            // Rapids: water this fast is churned white wherever it is rough.
+            v += 0.5f * MathUtil.Smoothstep(1.8f, 3.0f, sp) * MathUtil.Smoothstep(0.6f, 1.0f, froude);
             // Current pushing into a shore (upstream tips of islands, outer banks): foam lines.
             float t = -f.ShoreDist[i];
             if (t < 6f && ix > 0 && iz > 0 && ix < nx - 1 && iz < nz - 1)

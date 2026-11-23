@@ -215,3 +215,22 @@ Still to do (tier 3): rapids and a waterfall with portage, island labyrinths, re
   placeholders back. The windowed drift test now looks from the deck and reports fps.
 - The packs are **not in git** (Tom: keep them local; 247 MB). `/Assets/Trees/` is ignored; a clone without them gets
   the placeholder trees. Copy the packs (NoorForm export) into `Assets/Trees` to get real trees.
+
+## D19 — Rapids, and the weeping willow
+- **Rapids** (`FeatureKind.Rapid`, relative frequency 0.3; every riffle in a gorge becomes one): 200–400 m, the river
+  narrower (−10 %) and shallow (1.3 m), meanders damped. `CourseSegments.RapidRocks`: ≤ 44 rocks, two ledges of
+  pour-over rocks just under the surface, boulders between (many emergent), and a winding chute (±30 % of the
+  half-width, ≥ 4.5 m either side) kept clear, so a raft can be steered through rather than pinballed. Course head
+  loss in rapids × (1 + `Course.RapidLoss` = 0.25) for the boulders the 1D model can't see.
+- Result on the first rapid (σ ≈ 4.9 km): 3.1 m/s along it vs 1.1 m/s around, chute ≥ 1.24 m deep, water balanced.
+  The raft runs it at ~3.4 m/s, bumps a boulder or two (≤ 4.8° tilt), never grounds.
+- **Calibration**: when the one-step calibration misses the course's inlet level by > 1.2 cm (rapids are strongly
+  nonlinear), up to three more passes on converged solves scale conveyance by √(drop ratio) each.
+- **White water**: standing waves grow into haystacks (≤ 0.37 m) in fast supercritical water (`SurfaceWaves` and the
+  shader, mirrored); foam source + 0.5 above 1.8 m/s; the water shader lets coverage reach 85 % there instead of 60 %
+  and keeps the patches from thinning it. (The prototype reach's foam changed slightly: fingerprint 4A2ECF4ED9FD32BA.)
+- `--start=rapid` (or lake, riffle, split, confluence, gorge, braided, …) starts the raft above the first one.
+  Shots `rapid`, `rapid_top`, `willow`, `willow_far`.
+- Seam test: terrain allowance now uses the slope along the valley too (a cut across a steep wall failed it).
+- **Weeping willow** (Tom's pack): the fifth species, within 12 m of rivers and oxbows (60 % of broadleaves there).
+- `docs/.gdignore`: Godot no longer imports the docs' images.

@@ -360,14 +360,24 @@ public partial class Main : Node3D
                                    OnWater(best.X + dx * 0.8f, best.Z + dz * 0.8f, 0f));
                 break;
             }
+            case "willow":
+            case "willow_far":
+            {
+                // The weeping willow nearest the raft, from 14 m (or 120 m) away, a little above.
+                int sp = TreeLibrary.IndexOf(TreeLibrary.Kind.Willow);
+                if (sp < 0 || Streamer.Trees?.Nearest(sp, raft) is not { } w) break;
+                float dist = name == "willow" ? 14f : 160f;
+                var dir = (raft - w) with { Y = 0 };
+                dir = dir.LengthSquared() > 1f ? dir.Normalized() : Vector3.Forward;
+                FlyCam.LookAtPoint(w + dir * dist + Vector3.Up * (name == "willow" ? 4f : 30f), w + Vector3.Up * 5f);
+                break;
+            }
             case "rapid":
             {
                 if (FindFeature(FeatureKind.Rapid) is not { } f) break;
-                // From the bank below the rapid's middle, looking up into it.
-                var p = At(f.Mid + 60.0); var q = At(f.Mid - 50.0);
-                float hw = p.hr;
-                var from = Ground(p.x + p.rx * (hw + 3f), p.z + p.rz * (hw + 3f), 2.2f);
-                FlyCam.LookAtPoint(from, OnWater(q.x, q.z, 0f));
+                // Low over the water just below the rapid's middle, looking up into it.
+                var p = At(f.Mid + 45.0); var q = At(f.Mid - 40.0);
+                FlyCam.LookAtPoint(OnWater(p.x + p.rx * 0.3f * p.hr, p.z + p.rz * 0.3f * p.hr, 3.5f), OnWater(q.x, q.z, 0f));
                 break;
             }
             case "rapid_top":

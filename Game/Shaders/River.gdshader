@@ -359,7 +359,11 @@ void fragment() {
 	float coverage = foam_field * 0.7 + lap + rough_water * 0.15;
 	// Large, slowly drifting patches: foam comes in clumps and rafts, never as an even sheet.
 	float patch = flow_scalar(foam_tex, xz, flow, 38.0, foam_cycle * 3.0, t, jitter);
-	coverage = clamp(coverage * mix(0.35, 1.3, patch), 0.0, foam_max);
+	// White water: in rapids (fast and rough) the surface is mostly churned foam, so the patches can't thin it
+	// below most of the field's value and the cap rises.
+	float white = smoothstep(2.0, 3.0, speed) * rough_water;
+	coverage = clamp(max(coverage * mix(0.35, 1.3, patch), white * foam_field * mix(0.7, 0.95, patch)),
+	                 0.0, mix(foam_max, 0.85, white));
 	// Cloudy foam carried by the current, its edges broken up by a finer layer; bubbles in the thin parts.
 	vec2 fa = flow_rg(foam_tex, xz, flow, foam_scale, foam_cycle, t, jitter);
 	vec2 fb = flow_rg(foam_tex, xz, flow, foam_scale * 0.29, foam_cycle * 0.8, t, jitter + 0.37);
