@@ -1,0 +1,263 @@
+/* The River — expedition journal. A parchment page on a dark desk, photographs pasted in as plates. */
+
+:root {
+  --desk: #241810;
+  --desk-2: #3a2718;
+  --paper: #eee2c4;
+  --paper-edge: #d9c69c;
+  --ink: #2c2117;
+  --ink-soft: #5a4632;
+  --ink-faded: #7d6649;
+  --rust: #8a3b22;
+  --photo: #f4ecda;
+  --hand: "La Belle Aurore", "IM Fell English", cursive;
+  --serif: "IM Fell English", "Iowan Old Style", Georgia, serif;
+  --caps: "IM Fell English SC", "IM Fell English", Georgia, serif;
+}
+
+* { box-sizing: border-box; }
+
+html { background: var(--desk); }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 1.16rem;
+  line-height: 1.62;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255, 210, 150, 0.08), transparent 60%),
+    repeating-linear-gradient(92deg, rgba(0, 0, 0, 0.05) 0 2px, transparent 2px 9px),
+    linear-gradient(180deg, var(--desk-2), var(--desk));
+  padding: 48px 16px 64px;
+}
+
+/* ------------------------------------------------------------------ the page */
+
+.journal {
+  position: relative;
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 64px 72px 56px;
+  background-color: var(--paper);
+  /* paper grain, foxing, darker edges */
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.35  0 0 0 0 0.25  0 0 0 0 0.12  0 0 0 0.09 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"),
+    radial-gradient(circle at 18% 22%, rgba(150, 100, 40, 0.10) 0 40px, transparent 90px),
+    radial-gradient(circle at 84% 63%, rgba(150, 100, 40, 0.08) 0 30px, transparent 80px),
+    radial-gradient(ellipse at center, transparent 55%, rgba(120, 80, 30, 0.22) 100%);
+  box-shadow:
+    0 0 0 1px var(--paper-edge),
+    0 20px 50px rgba(0, 0, 0, 0.55),
+    inset 0 0 60px rgba(110, 70, 20, 0.18);
+  border-radius: 3px 6px 4px 5px;
+}
+
+/* a ledger margin rule */
+.journal::before {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: 44px;
+  width: 1px;
+  background: rgba(138, 59, 34, 0.35);
+}
+
+/* ------------------------------------------------------------------ title */
+
+.title { text-align: center; margin-bottom: 40px; }
+
+.compass { width: 86px; height: 86px; margin: 0 auto 8px; display: block; opacity: 0.85; }
+
+.title h1 {
+  font-family: var(--caps);
+  font-weight: 400;
+  font-size: clamp(2.6rem, 8vw, 4.2rem);
+  letter-spacing: 0.08em;
+  line-height: 1.05;
+  margin: 0;
+}
+
+.title .sub {
+  font-style: italic;
+  color: var(--ink-soft);
+  font-size: 1.15rem;
+  margin: 10px auto 0;
+  max-width: 30em;
+}
+
+.title .kept {
+  font-family: var(--hand);
+  color: var(--ink-faded);
+  font-size: 1.25rem;
+  margin-top: 18px;
+}
+
+.rule {
+  text-align: center;
+  color: var(--ink-faded);
+  letter-spacing: 0.6em;
+  margin: 34px 0;
+  font-size: 1rem;
+  user-select: none;
+}
+
+/* ------------------------------------------------------------------ front matter */
+
+.company h2, .contents h2 {
+  font-family: var(--caps);
+  font-weight: 400;
+  text-align: center;
+  font-size: 1.35rem;
+  letter-spacing: 0.12em;
+  margin: 0 0 12px;
+}
+
+.company dl { margin: 0 auto; max-width: 34em; }
+.company dt { font-family: var(--caps); font-size: 1.1rem; margin-top: 8px; }
+.company dd { margin: 0 0 0 1.4em; font-style: italic; color: var(--ink-soft); }
+
+.contents ol {
+  list-style: none;
+  padding: 0;
+  max-width: 32em;
+  margin: 0 auto;
+  counter-reset: e;
+}
+.contents li { display: flex; gap: 0.6em; align-items: baseline; }
+.contents li::before {
+  counter-increment: e;
+  content: counter(e, upper-roman) ".";
+  font-family: var(--caps);
+  min-width: 2.6em;
+  color: var(--ink-faded);
+}
+.contents a { color: var(--ink); text-decoration: none; border-bottom: 1px dotted rgba(44, 33, 23, 0.4); }
+.contents a:hover { color: var(--rust); border-bottom-color: var(--rust); }
+.contents .latest { font-family: var(--hand); color: var(--rust); font-size: 1.1rem; margin-left: 0.4em; }
+
+/* ------------------------------------------------------------------ entries */
+
+.entry { margin-top: 10px; scroll-margin-top: 24px; }
+
+.entry header { margin-bottom: 14px; }
+
+.entry .when {
+  font-family: var(--hand);
+  color: var(--ink-faded);
+  font-size: 1.2rem;
+}
+
+.entry h2 {
+  font-family: var(--caps);
+  font-weight: 400;
+  font-size: 1.7rem;
+  line-height: 1.2;
+  margin: 2px 0 0;
+}
+
+.entry p { margin: 0 0 1em; text-align: justify; hyphens: auto; }
+
+.entry > p:first-of-type::first-letter {
+  font-family: var(--caps);
+  float: left;
+  font-size: 3.4em;
+  line-height: 0.82;
+  padding: 0.06em 0.08em 0 0;
+  color: var(--rust);
+}
+
+.note {
+  font-family: var(--hand);
+  color: var(--rust);
+  font-size: 1.2rem;
+  line-height: 1.5;
+  margin: 0.4em 0 1.2em 1.2em;
+  transform: rotate(-0.6deg);
+}
+
+/* ------------------------------------------------------------------ photographs ("plates") */
+
+.plate {
+  position: relative;
+  margin: 26px auto 30px;
+  padding: 12px 12px 10px;
+  background: var(--photo);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.18), 0 8px 18px rgba(60, 35, 10, 0.25);
+  max-width: 92%;
+  transform: rotate(-0.9deg);
+}
+.plate.r { transform: rotate(0.8deg); }
+
+.plate img {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: sepia(0.22) saturate(0.88) contrast(1.03);
+  transition: filter 0.4s;
+}
+.plate:hover img { filter: none; }
+
+.plate figcaption {
+  font-family: var(--hand);
+  color: var(--ink-soft);
+  font-size: 1.15rem;
+  text-align: center;
+  margin-top: 8px;
+}
+
+/* photo corners */
+.plate::before, .plate::after {
+  content: "";
+  position: absolute;
+  width: 34px; height: 34px;
+  background: linear-gradient(135deg, #3b2a1c 0 50%, transparent 50%);
+  opacity: 0.82;
+}
+.plate::before { top: -6px; left: -6px; }
+.plate::after { bottom: -6px; right: -6px; transform: rotate(180deg); }
+
+.plates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 22px;
+  margin: 26px 0 30px;
+}
+.plates .plate { margin: 0; max-width: 100%; }
+.plates .plate figcaption { font-size: 1.05rem; }
+
+/* ------------------------------------------------------------------ closing */
+
+.ahead {
+  margin-top: 8px;
+  padding: 18px 22px;
+  border: 1px solid rgba(90, 70, 50, 0.35);
+  border-radius: 2px;
+  background: rgba(255, 250, 235, 0.35);
+}
+.ahead h2 { font-family: var(--caps); font-weight: 400; font-size: 1.3rem; margin: 0 0 6px; }
+.ahead p { margin: 0; }
+
+footer {
+  margin-top: 46px;
+  text-align: center;
+  font-size: 0.95rem;
+  color: var(--ink-faded);
+  font-style: italic;
+}
+footer a { color: var(--ink-soft); }
+
+/* ------------------------------------------------------------------ small screens */
+
+@media (max-width: 640px) {
+  body { padding: 20px 8px 40px; font-size: 1.06rem; }
+  .journal { padding: 40px 22px 36px 30px; }
+  .journal::before { left: 16px; }
+  .plate { max-width: 100%; padding: 8px 8px 6px; }
+  .plates { grid-template-columns: 1fr; }
+  .entry p { text-align: left; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plate img { transition: none; }
+}

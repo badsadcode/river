@@ -45,3 +45,7 @@ The raft hull and the deck/player never collide with each other.
 * Screenshots: `tools/capture.sh "aerial@1,lake,raft@0" --frames=16` → `captures/*.png` (several minutes:
   lavapipe is slow). Drift test: `tools/drift_test.sh 300`.
 * The reach is cached in `user://cache/` keyed by the assembly build, so any rebuild regenerates it (~35 s).
+
+## Dev log
+* `devlog/` is the public dev log (https://badsadcode.github.io/river/), an 1890s explorer's journal. **No technical
+  talk** there (Tom's brief). How to add an entry: `devlog/README.md`. Pushing changes under `devlog/` publishes it.
