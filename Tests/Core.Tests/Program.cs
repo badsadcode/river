@@ -10,6 +10,31 @@ for (int a = 0; a < args.Length; a++) if (args[a] == "--map" && a + 1 < args.Len
 int failures = 0;
 void Check(bool ok, string what) { Console.WriteLine($"  [{(ok ? "PASS" : "FAIL")}] {what}"); if (!ok) failures++; }
 
+// ---------------------------------------------------------------- sandbox settings (fast)
+Console.WriteLine("Sandbox settings:");
+{
+    var w = new System.Collections.Generic.List<string>();
+    var hod = SandboxSettings.Parse(SandboxSettings.FromPreset("heart_of_darkness").ToJson(), w);
+    Check(hod.Mode.Permadeath && hod.Mind.Darkness == "abyss" && w.Count == 0, "preset round-trips through JSON without warnings");
+
+    w.Clear();
+    var part = SandboxSettings.Parse("{ \"Preset\": \"drifter\", \"Survival\": { \"Hunger\": 2 } }", w);
+    Check(part.Survival.Hunger == 2f && part.Survival.Thirst == 0.5f && w.Count == 0, "missing keys come from the file's preset");
+
+    w.Clear();
+    var bad = SandboxSettings.Parse("{ \"World\": { \"DistanceScale\": 7 }, \"Mind\": { \"Darkness\": \"pitch\" }, \"Foo\": 1 }", w);
+    Check(bad.World.DistanceScale == 1f && bad.Mind.Darkness == "grim" && w.Count == 3, $"bad values clamped/replaced with warnings ({w.Count})");
+
+    w.Clear();
+    var broken = SandboxSettings.Parse("{ not json", w);
+    Check(broken.Preset == "explorer" && w.Count == 1, "broken file falls back to explorer");
+
+    w.Clear();
+    var lenient = SandboxSettings.Parse("{ // comment\n \"Seed\": 42, \"Time\": { \"DayLengthMinutes\": \"90\", }, }", w);
+    Check(lenient.Seed == 42 && lenient.Time.DayLengthMinutes == 90f && w.Count == 0, "comments, trailing commas and quoted numbers are accepted");
+}
+if (Array.IndexOf(args, "--sandbox-only") >= 0) { Console.WriteLine(failures == 0 ? "ALL PASS" : $"{failures} FAILED"); return failures == 0 ? 0 : 1; }
+
 var settings = new ReachSettings();
 var field = ReachGenerator.Generate(settings, Console.WriteLine);
 

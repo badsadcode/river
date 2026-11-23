@@ -57,10 +57,31 @@ public partial class Main : Node3D
         else Task.Run(() => { Field = LoadOrGenerate(); CallDeferred(MethodName.BuildWorld); });
     }
 
+    /// <summary>The journey's sandbox settings (user://game_sandbox_settings.json, written with defaults if missing).</summary>
+    public SandboxSettings Sandbox { get; private set; }
+
+    void LoadSandbox()
+    {
+        string path = ProjectSettings.GlobalizePath("user://game_sandbox_settings.json");
+        var warnings = new List<string>();
+        if (!System.IO.File.Exists(path))
+        {
+            Sandbox = SandboxSettings.FromPreset("explorer");
+            try { Sandbox.Save(path); GD.Print($"Wrote default sandbox settings: {path}"); }
+            catch (Exception e) { GD.PushWarning($"Could not write {path}: {e.Message}"); }
+        }
+        else Sandbox = SandboxSettings.Load(path, warnings);
+        foreach (var w in warnings) GD.PushWarning($"Sandbox settings: {w}");
+    }
+
     ReachField LoadOrGenerate()
     {
-        var settings = new ReachSettings();
-        string key = typeof(ReachGenerator).Assembly.ManifestModule.ModuleVersionId + "/" + settings.Seed;
+        LoadSandbox();
+        var settings = new ReachSettings { Seed = Sandbox.Seed };
+        // Current strength scales the discharge: same channels, faster (or lazier) water, consistently everywhere.
+        settings.DischargeMain *= Sandbox.River.CurrentStrength;
+        settings.DischargeTributary *= Sandbox.River.CurrentStrength;
+        string key = typeof(ReachGenerator).Assembly.ManifestModule.ModuleVersionId + "/" + settings.Seed + "/" + Sandbox.River.CurrentStrength.ToString(CultureInfo.InvariantCulture);
         string path = ProjectSettings.GlobalizePath($"user://cache/reach_{settings.Seed}.bin");
         if (!_args.ContainsKey("regen"))
         {

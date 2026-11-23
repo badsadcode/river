@@ -1,6 +1,11 @@
 # RIVER — Sandbox settings (`game_sandbox_settings.json`)
 
-*v0.1 draft · 2026-11-23*
+*v0.2 · 2026-11-23*
+
+**Status:** loader implemented (`Game/Core/SandboxSettings.cs`, tested in `Tests/Core.Tests`). The game reads
+`%APPDATA%\Godot\app_userdata\River\game_sandbox_settings.json` (written with the Explorer preset on first launch).
+In use so far: `Seed`, `River.CurrentStrength` (scales the river's discharge). The rest is stored and validated,
+waiting for the systems that use it.
 
 Every new journey is created from a **sandbox settings** file. Instead of us deciding one "correct" scale,
 darkness or difficulty, the player picks a **preset** and can override any value. The settings are copied into
