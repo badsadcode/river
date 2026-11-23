@@ -14,8 +14,8 @@ labyrinths (Tom's sketch #1) are possible. A centre line with a width can't do t
 ## D3 — Flow from a Manning-friction potential solve
 Unit discharge q = h^(5/3)/(n√S)·(−∇η), mass conservation → elliptic equation for the surface η, Picard iterations
 on the nonlinear conveyance, Jacobi-preconditioned CG. One solve gives the water surface (flat lakes, steeper
-riffles) and the current (splits around islands, fast narrows, slack bays) consistently. No inertia yet, so no
-eddies or recirculation behind obstacles: planned as an added vortex layer.
+riffles) and the current (splits around islands, fast narrows, slack bays) consistently. No inertia, so no
+eddies or recirculation behind obstacles: those are added on top (D11).
 The bed is defined *relative to the solved surface* (designed depth below η), so depth is exactly as designed.
 
 ## D4 — Foam is precomputed and advected
@@ -59,3 +59,24 @@ every latitude, and the journey south can later lower the latitude without retun
 through sunrise and burns off by mid-morning; a thinner veil returns in the evening. At night the one shadowed
 directional light becomes moonlight; stars are an equirectangular texture in the procedural sky's cover slot.
 Lights in the `night_lights` group (the raft lantern) fade in at dusk. Logic and tests: `Game/Core/DayCycle.cs`.
+
+## D11 — Eddies: lee zones from the centre lines, recirculation from a stream function
+The potential solve has no inertia, so behind an island or a point the current just wraps around and closes up.
+Real rivers separate there: the main current shoots past and a slack, recirculating backwater forms. Running real
+shallow-water dynamics to a steady state was ruled out: too slow for generation, and it sheds unsteady vortices
+we couldn't cache. Instead (`Game/Core/Eddies.cs`):
+1. **Lee zones from geometry.** For each water node, walk back upstream *along its own channel's centre line at the
+   same lateral offset*. Hitting an obstacle (bank, island, rock top) that sticks out `a` metres past the node's line
+   makes the node part of that obstacle's lee if it is within ~6·a downstream (reattachment behind a step) and
+   within the bed-friction length 0.25·h/c_f (shallow wakes are short). Curvilinear tracing is what keeps outer
+   banks of meander bends from looking like obstacles; where offset lines fold over on the inside of tight bends,
+   the trace stops.
+2. **Blocked re-solve.** The flow is solved again (one Picard step from the first answer) with conveyance cut by 97 %
+   in lee zones, so the main current stays a jet and the lee carries almost no net flow. Mass stays conserved.
+3. **Recirculation.** Vorticity with the shear layer's sense is spread over each lee, sized so the eddy turns at
+   ~0.35× the passing current. A stream function ψ (zero on every shore and around the zone) is solved from it with
+   the same CG, and the eddy current is curl ψ/h: divergence-free and never crossing a shore. A one-sided lee
+   gets one cell; an island wake gets a counter-rotating pair with water running back along its axis.
+Cost: ~1.5 s more generation (the blocked re-solve). Checks in `Tests/Core.Tests` (island wakes flow back, the
+lake inlet has backwaters, plain meanders stay free of them, eddies stay minor and slower than the river);
+`-- --flow out.png` draws the current (blue with the channel, red against it, green = lee).

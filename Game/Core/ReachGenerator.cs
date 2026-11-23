@@ -20,7 +20,7 @@ public sealed class ReachSettings
 
 /// <summary>
 /// Generates a prototype river reach, river first: centre lines → water shape (with islands) → bed →
-/// flow (surface + current) → banks, floodplain and valley → foam.
+/// flow (surface + current) → eddies → banks, floodplain and valley → foam.
 ///
 /// The prototype reach is laid out to show the feature catalogue (docs/DESIGN_PILLARS.md §4): meanders at the
 /// top, a river-lake with one large island and islets (Tom's sketch #1) in the middle, a tributary joining from
@@ -183,8 +183,23 @@ public static class ReachGenerator
         };
         var res = s.ReferencePicardSteps > 0 ? FlowSolver.Solve(problem, s.ReferencePicardSteps, m => Log(m)) : FlowSolver.SolveMultilevel(problem, m => Log(m));
         Array.Copy(res.Eta, f.Eta, total);
-        ComputeVelocity(f, connected, s);
+        ComputeVelocity(f, connected, s, null);
         Log($"flow solved ({res.Iterations} CG iterations), outflow {f.OutflowMeasured:F1} m³/s");
+
+        // ------------------------------------------------------------ 7b. eddies (docs/DECISIONS.md D11)
+        // Lee zones behind obstacles carry little net flow (the main current shoots past them): re-solve with their
+        // conveyance cut, starting from the answer above, then add the recirculation inside them.
+        var lines = new[] { f.Main, f.Tributary };
+        var nearestIdx = new[] { mainIdx, tribIdx };
+        var lee = Eddies.LeeZones(f, connected, lines, nearestIdx, lineOf, s.Manning);
+        var keep = new float[total];
+        for (int i = 0; i < total; i++) keep[i] = 1f - Eddies.LeeBlockage * lee[i];
+        problem.ConveyanceScale = keep;
+        var res2 = FlowSolver.Solve(problem, 1, m => Log("lee " + m), f.Eta);
+        Array.Copy(res2.Eta, f.Eta, total);
+        ComputeVelocity(f, connected, s, keep);
+        Eddies.AddRecirculation(f, connected, lee, lines, nearestIdx, lineOf, m => Log(m));
+        Log($"flow with lee zones, outflow {f.OutflowMeasured:F1} m³/s");
 
         // Surface trend along the valley (for far terrain and the bits of water outside the grid).
         double sz = 0, se = 0, szz = 0, sze = 0; int cnt = 0;
@@ -500,14 +515,14 @@ public static class ReachGenerator
         return q;
     }
 
-    static void ComputeVelocity(ReachField f, bool[] active, ReachSettings s)
+    static void ComputeVelocity(ReachField f, bool[] active, ReachSettings s, float[] conveyanceScale)
     {
         int nx = f.Nx, nz = f.Nz;
         float Kn(int i)
         {
             float h = MathF.Max(f.Depth[i], 0.03f);
             float sl = Math.Clamp(FlowSolver.Slope(f.Eta, active, nx, nz, i, s.Cell), s.RefSlope * 0.15f, s.RefSlope * 60f);
-            return MathF.Pow(h, 5f / 3f) / (s.Manning * MathF.Sqrt(sl));
+            return MathF.Pow(h, 5f / 3f) / (s.Manning * MathF.Sqrt(sl)) * (conveyanceScale?[i] ?? 1f);
         }
         var k = new float[nx * nz];
         for (int i = 0; i < k.Length; i++) k[i] = active[i] ? Kn(i) : 0f;
@@ -551,7 +566,7 @@ public static class ReachGenerator
         }
     }
 
-    static void BoxBlur(float[] a, float[] o, int nx, int nz, int r, bool alongX)
+    internal static void BoxBlur(float[] a, float[] o, int nx, int nz, int r, bool alongX)
     {
         int n = alongX ? nx : nz, lines = alongX ? nz : nx;
         System.Threading.Tasks.Parallel.For(0, lines, line =>

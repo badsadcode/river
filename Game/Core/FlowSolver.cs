@@ -12,7 +12,8 @@ namespace River.Core;
 ///
 /// What this gives for free: the current splits around islands in proportion to channel conveyance, speeds up
 /// in narrows and shallows, goes slack in wide deep lakes; the surface is nearly flat across lakes and steepens
-/// through riffles. What it does not give: inertia (eddies, recirculation behind obstacles) — added separately.
+/// through riffles. What it does not give: inertia (eddies, recirculation behind obstacles) — added on top by
+/// <see cref="Eddies"/>.
 /// </summary>
 public static class FlowSolver
 {
@@ -27,6 +28,7 @@ public static class FlowSolver
         public float[] Source;      // inflow (m³/s) per node
         public float Manning;       // n
         public float RefSlope;      // slope used for the first (linear) iteration
+        public float[] ConveyanceScale; // optional per-node factor on K (lee zones carry little net flow); null = 1
     }
 
     public sealed class Result
@@ -61,12 +63,14 @@ public static class FlowSolver
         {
             Nx = cx, Nz = cz, Cell = p.Cell * 2f, FixedEta = p.FixedEta, Manning = p.Manning, RefSlope = p.RefSlope,
             Active = new bool[ct], Fixed = new bool[ct], Depth = new float[ct], Source = new float[ct],
+            ConveyanceScale = p.ConveyanceScale != null ? new float[ct] : null,
         };
         for (int z = 0; z < cz; z++)
             for (int x = 0; x < cx; x++)
             {
                 int fi = (2 * z) * p.Nx + 2 * x, ci = z * cx + x;
                 c.Active[ci] = p.Active[fi]; c.Fixed[ci] = p.Fixed[fi]; c.Depth[ci] = p.Depth[fi];
+                if (c.ConveyanceScale != null) c.ConveyanceScale[ci] = p.ConveyanceScale[fi];
             }
         // Coarse nodes cut off from the outlet would make the system singular: drop them.
         var reach = new bool[ct];
@@ -158,7 +162,7 @@ public static class FlowSolver
                 float h = MathF.Max(p.Depth[i], 0.03f);
                 float s = step == 0 && initialEta == null ? p.RefSlope : Slope(eta, p.Active, nx, nz, i, p.Cell);
                 s = Math.Clamp(s, p.RefSlope * 0.15f, p.RefSlope * 60f);
-                kNode[i] = MathF.Pow(h, 5f / 3f) / (p.Manning * MathF.Sqrt(s));
+                kNode[i] = MathF.Pow(h, 5f / 3f) / (p.Manning * MathF.Sqrt(s)) * (p.ConveyanceScale?[i] ?? 1f);
             }
 
             // Assemble: diag, 4 neighbour weights, rhs.
@@ -219,7 +223,7 @@ public static class FlowSolver
     }
 
     /// <summary>Jacobi-preconditioned conjugate gradients for the assembled 5-point system.</summary>
-    static (int, double) Pcg(int n, double[] diag, int[] nb, double[] w, double[] b, double[] x, double tol, int maxIter)
+    internal static (int, double) Pcg(int n, double[] diag, int[] nb, double[] w, double[] b, double[] x, double tol, int maxIter)
     {
         var r = new double[n]; var z = new double[n]; var pv = new double[n]; var ap = new double[n];
         double bnorm = 0;

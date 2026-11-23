@@ -19,7 +19,7 @@ public static class ReachCache
         w.Write(f.Nx); w.Write(f.Nz); w.Write(f.Cell); w.Write(f.Seed);
         w.Write(f.EtaTrendA); w.Write(f.EtaTrendB); w.Write(f.OutflowMeasured); w.Write(f.InflowTotal);
         WriteBools(w, f.Water); WriteBools(w, f.Still);
-        foreach (var a in new[] { f.Height, f.Eta, f.Depth, f.VelX, f.VelZ, f.Foam, f.ShoreDist }) WriteFloats(w, a);
+        foreach (var a in new[] { f.Height, f.Eta, f.Depth, f.VelX, f.VelZ, f.Foam, f.ShoreDist, f.Eddy }) WriteFloats(w, a);
         WriteLine(w, f.Main); WriteLine(w, f.Tributary);
         w.Write(f.Islands.Count);
         foreach (var i in f.Islands)
@@ -44,6 +44,7 @@ public static class ReachCache
             f.Water = ReadBools(rd, n); f.Still = ReadBools(rd, n);
             f.Height = ReadFloats(rd, n); f.Eta = ReadFloats(rd, n); f.Depth = ReadFloats(rd, n);
             f.VelX = ReadFloats(rd, n); f.VelZ = ReadFloats(rd, n); f.Foam = ReadFloats(rd, n); f.ShoreDist = ReadFloats(rd, n);
+            f.Eddy = ReadFloats(rd, n);
             f.Main = ReadLine(rd); f.Tributary = ReadLine(rd);
             int ni = rd.ReadInt32();
             for (int k = 0; k < ni; k++)

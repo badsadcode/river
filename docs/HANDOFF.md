@@ -9,6 +9,10 @@
   valley walls. Headless tests in `Tests/Core.Tests` (conservation, speeds, determinism, map PNG).
 * **Flow** (`Game/Core/FlowSolver.cs`): Manning-friction potential solve → water surface + current on a 2 m grid.
   Mean 0.66 m/s, lake 0.11 m/s, riffle 2.3 m/s; inflow = outflow.
+* **Eddies** (`Game/Core/Eddies.cs`, D11): lee zones behind islands, points, lake inlet corners, the confluence and
+  rocks get a blocked re-solve plus a divergence-free recirculation, so water runs back behind obstacles (~1 % of
+  the river, slower than the main current). `ReachField.Eddy` marks the lee zones (0..1) for later use (mooring,
+  fishing spots, foam on eddy lines). Flow map: `dotnet run --project Tests/Core.Tests -c Release -- --flow out.png`.
 * **World** (`Game/World/`): terrain chunks (2 LODs) + heightmap collision + far land to the horizon, water meshes
   at the solved surface, placeholder trees/bushes/boulders, sky/sun/fog presets, river mist fog volume.
 * **Water shader** (`Game/Shaders/River.gdshader`): see `docs/WATER.md`.
@@ -21,9 +25,10 @@
   takes the oar (E), poles (Q), anchors (G), chase camera (V).
 
 ## Known gaps / next steps (in rough priority)
-1. **Eddies and recirculation** behind islands, points and rocks (the potential flow has no inertia): add a
-   vortex/eddy layer to the current field (affects raft, foam and ripples).
+1. **Eddies, next steps**: foam gathering on eddy lines (the lee edges), calmer ripples inside backwaters, and
+   checking the feel on the raft in person. Long lakes only get gyres near the inlet (the 6× reattachment rule).
 2. **Generation time**: multilevel solve brought it down ~35 % (D9); multigrid-preconditioned CG would cut it further.
+   The eddy step adds one fine re-solve (~1.5 s on a desktop).
 3. **Endless streaming**: the reach is one fixed grid. Next: segments generated ahead along the river, floating origin.
 4. **Rapids & a waterfall with portage**, island labyrinth segment type.
 5. Water: wakes around the raft and the oar blade, splash particles at rocks, underwater view when swimming,

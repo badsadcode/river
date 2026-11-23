@@ -13,7 +13,7 @@ Studio motto #001: *code shall remain understandable to whichever AI inherits th
   Pause and ask Tom before significant artistic decisions (looks, palettes, tone).
 * Commit small, push often. No pull requests unless Tom asks. Never rewrite pushed history.
 * Keep the headless generator tests passing:
-  `dotnet run --project Tests/Core.Tests -c Release` (add `-- --map out.png` for a top-down map).
+  `dotnet run --project Tests/Core.Tests -c Release` (add `-- --map out.png` for a top-down map, `--flow out.png` for the current and eddies).
 * Shaders: Godot does not allow `return` in `fragment()`. After shader changes, run a capture and grep the log for
   `SHADER ERROR`.
 

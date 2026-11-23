@@ -4,8 +4,12 @@ using System.IO.Compression;
 using River.Core;
 
 // Headless checks of the river generator. Exit code 0 = all pass.
-string mapPath = null;
-for (int a = 0; a < args.Length; a++) if (args[a] == "--map" && a + 1 < args.Length) mapPath = args[++a];
+string mapPath = null, flowPath = null;
+for (int a = 0; a < args.Length; a++)
+{
+    if (args[a] == "--map" && a + 1 < args.Length) mapPath = args[++a];
+    else if (args[a] == "--flow" && a + 1 < args.Length) flowPath = args[++a];
+}
 
 int failures = 0;
 void Check(bool ok, string what) { Console.WriteLine($"  [{(ok ? "PASS" : "FAIL")}] {what}"); if (!ok) failures++; }
@@ -110,6 +114,53 @@ for (int i = 0; i < field.Water.Length; i++)
     if (!field.Water[i] && field.ShoreDist[i] < 3f && field.Height[i] < field.Eta[i] - 0.05f) floating++;
 Check(floating < 50, $"banks stay above the water next to the shore ({floating} low nodes)");
 
+// Eddies: water should turn back behind obstacles, and only there.
+{
+    var (tanX, tanZ) = Tangents.PerNode(field);
+    float Along(int i) => field.VelX[i] * tanX[i] + field.VelZ[i] * tanZ[i];
+    int wet = 0, back = 0, lakeWet = 0, lakeBack = 0, upWet = 0, upBack = 0; float worstBack = 0f;
+    for (int i = 0; i < field.Water.Length; i++)
+    {
+        if (!field.Water[i] || field.Depth[i] < 0.15f) continue;
+        float u = Along(i), z = (i / field.Nx) * field.Cell;
+        bool b = u < -0.02f;
+        wet++; if (b) { back++; worstBack = MathF.Max(worstBack, -u); }
+        if (z > 1100 && z < 1350) { lakeWet++; if (b) lakeBack++; }
+        if (z > 150 && z < 1000) { upWet++; if (b) upBack++; }
+    }
+    float fBack = back / (float)wet, fLake = lakeBack / (float)Math.Max(1, lakeWet), fUp = upBack / (float)Math.Max(1, upWet);
+    Console.WriteLine($"  eddies: {fBack:P1} of the water flows upstream (lake inlet {fLake:P1}, upper meanders {fUp:P1}), fastest {worstBack:F2} m/s");
+
+    // Island wakes: along each island's axis, just past its tail, water comes back towards it. Only islands whose
+    // tail ends in open water count (in this seed the split island's tail runs into the bank of a bend).
+    int wakesTested = 0, wakesBack = 0;
+    foreach (var isl in field.Islands)
+    {
+        // Near wake: from the tail (the noisy outline can reach past LengthDown) one island width downstream,
+        // half a width across. Share of it where the water runs back towards the island.
+        float d0 = isl.LengthDown;
+        while (d0 < isl.LengthDown * 1.6f && isl.Sdf(isl.X + isl.DirX * d0, isl.Z + isl.DirZ * d0) < 1f) d0 += 1f;
+        int wn = 0, wb = 0; bool open = true;
+        for (float d = d0 + 1f; d <= d0 + 1f + 2f * isl.HalfWidth && open; d += 1f)
+            for (float v = -0.5f * isl.HalfWidth; v <= 0.5f * isl.HalfWidth; v += 1f)
+            {
+                float x = isl.X + isl.DirX * d - isl.DirZ * v, z = isl.Z + isl.DirZ * d + isl.DirX * v;
+                if (!field.InDomain(x, z) || field.SampleDepth(x, z) < 0.15f) { open = false; break; }
+                var (vx, vz) = field.SampleVelocity(x, z);
+                wn++; if (vx * isl.DirX + vz * isl.DirZ < 0f) wb++;
+            }
+        if (!open || wn == 0) continue;
+        float share = wb / (float)wn;
+        // Potential flow alone gives 0 %: the wake just closes. A recirculation bubble's reversed core is ~1/3–1/2.
+        wakesTested++; if (share > 0.25f) wakesBack++;
+        Console.WriteLine($"  island wake (half-width {isl.HalfWidth:F0} m): {share:P0} of the near wake flows back towards it");
+    }
+    Check(wakesTested >= 2 && wakesBack * 2 > wakesTested, $"water turns back into island wakes ({wakesBack}/{wakesTested})");
+    Check(fLake > 0.03f, "the lake inlet has backwaters beside the main current");
+    Check(fUp < 0.04f, "plain meanders stay mostly free of backflow (no false eddies on outer banks)");
+    Check(fBack > 0.005f && fBack < 0.15f && worstBack < 0.5f * maxSpeed, "eddies are a minor, slower part of the river");
+}
+
 // Determinism.
 var again = ReachGenerator.Generate(settings);
 bool same = true;
@@ -132,6 +183,7 @@ if (Array.IndexOf(args, "--reference") >= 0)
 }
 
 if (mapPath != null) { MapRender.Write(field, mapPath); Console.WriteLine($"map: {mapPath}"); }
+if (flowPath != null) { MapRender.WriteFlow(field, flowPath); Console.WriteLine($"flow map: {flowPath}"); }
 Console.WriteLine(failures == 0 ? "ALL PASS" : $"{failures} FAILED");
 return failures == 0 ? 0 : 1;
 
@@ -170,6 +222,29 @@ static class MapRender
         WritePng(path, w, h, px);
     }
 
+    // Flow map: blue = with the channel, red = against it (eddies), brightness = speed; lee zones tinted green;
+    // land dark grey.
+    public static void WriteFlow(ReachField f, string path)
+    {
+        var (tx, tz) = Tangents.PerNode(f);
+        int w = f.Nx, h = f.Nz;
+        var px = new byte[w * h * 3];
+        for (int i = 0; i < w * h; i++)
+        {
+            float r = 0.18f, g = 0.18f, b = 0.18f;
+            if (f.Water[i])
+            {
+                float u = f.VelX[i] * tx[i] + f.VelZ[i] * tz[i];
+                float sp = MathF.Sqrt(f.VelX[i] * f.VelX[i] + f.VelZ[i] * f.VelZ[i]);
+                float e = f.Eddy != null ? f.Eddy[i] : 0f;
+                if (u >= 0) { r = 0.05f; g = 0.1f + 0.35f * e; b = 0.25f + 0.75f * MathF.Min(sp / 1.5f, 1f); }
+                else { r = 0.35f + 0.65f * MathF.Min(-u / 0.4f, 1f); g = 0.1f + 0.35f * e; b = 0.1f; }
+            }
+            px[i * 3] = (byte)(Math.Clamp(r, 0, 1) * 255); px[i * 3 + 1] = (byte)(Math.Clamp(g, 0, 1) * 255); px[i * 3 + 2] = (byte)(Math.Clamp(b, 0, 1) * 255);
+        }
+        WritePng(path, w, h, px);
+    }
+
     static void WritePng(string path, int w, int h, byte[] rgb)
     {
         using var fs = File.Create(path);
@@ -195,5 +270,31 @@ static class MapRender
     {
         foreach (byte x in d) { c ^= x; for (int k = 0; k < 8; k++) c = (c & 1) != 0 ? 0xedb88320 ^ (c >> 1) : c >> 1; }
         return c;
+    }
+}
+
+static class Tangents
+{
+    /// <summary>Per node: the flow direction of the nearest centre-line sample (main river or tributary).</summary>
+    public static (float[] x, float[] z) PerNode(ReachField f)
+    {
+        int n = f.Nx * f.Nz;
+        var tx = new float[n]; var tz = new float[n]; var d2 = new float[n];
+        Array.Fill(d2, float.MaxValue);
+        foreach (var c in new[] { f.Main, f.Tributary })
+            for (int k = 0; k < c.Count; k++)
+            {
+                float r = MathF.Max(c.HalfLeft[k], c.HalfRight[k]) + 8f;
+                int x0 = Math.Max(0, (int)((c.X[k] - r) / f.Cell)), x1 = Math.Min(f.Nx - 1, (int)((c.X[k] + r) / f.Cell) + 1);
+                int z0 = Math.Max(0, (int)((c.Z[k] - r) / f.Cell)), z1 = Math.Min(f.Nz - 1, (int)((c.Z[k] + r) / f.Cell) + 1);
+                for (int z = z0; z <= z1; z++)
+                    for (int x = x0; x <= x1; x++)
+                    {
+                        float dx = x * f.Cell - c.X[k], dz = z * f.Cell - c.Z[k], d = dx * dx + dz * dz;
+                        int i = z * f.Nx + x;
+                        if (d < d2[i]) { d2[i] = d; tx[i] = c.TanX[k]; tz[i] = c.TanZ[k]; }
+                    }
+            }
+        return (tx, tz);
     }
 }

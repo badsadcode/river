@@ -30,6 +30,7 @@ public sealed class ReachField
     public float[] Depth;       // water depth (0 on land)
     public float[] VelX, VelZ;  // depth-averaged current (m/s)
     public float[] Foam;        // 0..1 foam coverage (advected downstream from its sources)
+    public float[] Eddy;        // 0..1 lee/recirculation zone strength (backwaters behind islands, points, rocks)
     public float[] ShoreDist;   // signed distance to the shoreline (m): negative in water, positive on land
 
     public Centerline Main, Tributary;
