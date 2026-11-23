@@ -20,7 +20,9 @@ The bed is defined *relative to the solved surface* (designed depth below η), s
 
 ## D4 — Foam is precomputed and advected
 Foam sources (high Froude number, current running into a shore, rocks breaking the surface) are found on the grid
-and advected downstream with decay, so foam trails off behind rocks and island tips. The shader adds fine moving
+and advected downstream with decay, so foam trails off behind rocks and island tips. Since D11, eddy lines (the
+edges of lee zones in water faster than ~0.25 m/s) are foam sources too, and foam decays much more slowly inside
+lee zones, so the recirculation gathers it into backwater rafts. The shader adds fine moving
 detail on top.
 
 ## D5 — Water shader: lit scattering + emitted transmission + own SSR

@@ -201,6 +201,10 @@ public partial class Main : Node3D
                 FlyCam.LookAtPoint(from, W(tr.X[a], tr.Z[a], 0f));
                 break;
             }
+            // Eddies: from above and beside an island, looking back up its wake. "eddy" = a lake islet (slow water),
+            // "bar" = the gravel bar in the meanders (faster water: foam on the eddy line).
+            case "eddy": WakeShot(f.Islands[Math.Min(2, f.Islands.Count - 1)], 38f, 22f, 16f); break;
+            case "bar": WakeShot(f.Islands[Math.Min(4, f.Islands.Count - 1)], 26f, 8f, 30f); break;
             case "water_close":
             {
                 int i = m.IndexAtZ(420f);
@@ -214,6 +218,16 @@ public partial class Main : Node3D
                 break;
         }
         UseFlyCam(true);
+    }
+
+    void WakeShot(Island isl, float back, float side, float up)
+    {
+        var f = Field;
+        float sx = -isl.DirZ, sz = isl.DirX;
+        float tx = isl.X + isl.DirX * isl.LengthDown, tz = isl.Z + isl.DirZ * isl.LengthDown;
+        float cx = tx + isl.DirX * back + sx * side, cz = tz + isl.DirZ * back + sz * side;
+        var from = new Vector3(cx, MathF.Max(f.SampleEta(cx, cz), f.SampleHeight(cx, cz)) + up, cz);
+        FlyCam.LookAtPoint(from, new Vector3(tx + isl.DirX * 6f, f.SampleEta(tx, tz), tz + isl.DirZ * 6f));
     }
 
     async Task Capture()

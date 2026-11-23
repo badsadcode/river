@@ -21,7 +21,8 @@ The river's look is driven by the same data that drives the raft: the reach fiel
 4. **Reflections** — our own screen-space ray march (40 steps + refinement) for banks and trees; where it finds
    nothing the engine's sky reflection and sun glint take over (SPECULAR masked by the SSR hit). Fresnel ≈ 0.02 at
    normal incidence. Roughness grows with distance so the sun becomes a glittering path, not a disc.
-5. **Foam** — coverage from the field (rocks, riffles, current pushing into shores, advected downstream) plus a
+5. **Foam** — coverage from the field (rocks, riffles, current pushing into shores, eddy lines; advected with the
+   current, lingering in backwaters) plus a
    thin lap line at the bank; drawn as a bubbly net carried by the flow and streaks stretched along the current.
    Coverage is capped so it is never a solid white sheet.
 6. **Edge** — alpha fades over the last ~15 cm of thickness so shorelines aren't hard cuts.

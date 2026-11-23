@@ -608,6 +608,14 @@ public static class ReachGenerator
                     v += MathUtil.Clamp01(into / 0.6f) * (1f - t / 6f) * 0.8f;
                 }
             }
+            // Eddy lines: where the main current shears past a slack lee, the water folds and traps foam in a line
+            // along the lee's edge. Strongest mid-way into the lee (lee·(1−lee) peaks at 0.5), scaled by how fast
+            // the passing water is (barely any in the slow lake).
+            if (f.Eddy != null)
+            {
+                float e = f.Eddy[i];
+                v += 0.6f * MathUtil.Smoothstep(0.35f, 0.9f, 4f * e * (1f - e)) * MathUtil.Smoothstep(0.25f, 1.0f, sp);
+            }
             src[i] = MathUtil.Clamp01(v);
         }
         foreach (var r in f.Rocks)
@@ -622,10 +630,13 @@ public static class ReachGenerator
             });
         }
 
-        // Advect downstream with decay: foam born at a rock or a shore trails away with the current.
+        // Advect with decay: foam born at a rock or a shore trails away with the current, and in backwaters (lee
+        // zones) it lasts much longer, so the recirculation gathers it into slowly turning rafts.
         var foam = (float[])src.Clone();
         var next = new float[total];
-        const float dt = 2.5f, decay = 0.93f;
+        const float dt = 2.5f;
+        var decay = new float[total];
+        for (int i = 0; i < total; i++) decay[i] = MathUtil.Lerp(0.93f, 0.985f, f.Eddy != null ? f.Eddy[i] : 0f);
         for (int it = 0; it < 50; it++)
         {
             System.Threading.Tasks.Parallel.For(0, nz, iz =>
@@ -635,7 +646,7 @@ public static class ReachGenerator
                     int i = iz * nx + ix;
                     if (!active[i]) { next[i] = 0f; continue; }
                     float bx = ix * s.Cell - f.VelX[i] * dt, bz = iz * s.Cell - f.VelZ[i] * dt;
-                    next[i] = MathF.Max(src[i], decay * f.Sample(foam, bx, bz));
+                    next[i] = MathF.Max(src[i], decay[i] * f.Sample(foam, bx, bz));
                 }
             });
             (foam, next) = (next, foam);

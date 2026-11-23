@@ -25,8 +25,9 @@
   takes the oar (E), poles (Q), anchors (G), chase camera (V).
 
 ## Known gaps / next steps (in rough priority)
-1. **Eddies, next steps**: foam gathering on eddy lines (the lee edges), calmer ripples inside backwaters, and
-   checking the feel on the raft in person. Long lakes only get gyres near the inlet (the 6× reattachment rule).
+1. **Eddies, next steps**: foam now gathers on eddy lines and lingers in backwaters (subtle; the 2 m grid can't draw
+   sharp eddy lines, a shader-side line would). Still to judge in person: backward-running ripples and the raft's
+   feel. Long lakes only get gyres near the inlet (the 6× reattachment rule). Shots: `eddy`, `bar`.
 2. **Generation time**: multilevel solve brought it down ~35 % (D9); multigrid-preconditioned CG would cut it further.
    The eddy step adds one fine re-solve (~1.5 s on a desktop).
 3. **Endless streaming**: the reach is one fixed grid. Next: segments generated ahead along the river, floating origin.
