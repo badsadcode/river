@@ -139,7 +139,7 @@ public static class TerrainBuilder
     public static float FarHeight(ReachField f, float x, float z, out float waterEta)
     {
         float eta = f.EtaTrend(z);
-        float h = eta + 1.2f + ReachGenerator.FloodplainRelief(x, z, f.Seed) + ReachGenerator.ValleyRelief(x, z, f.Seed, f.SizeX);
+        float h = eta + 1.2f + Valley.FloodplainRelief(x, z, f.Seed) + Valley.Relief(x, z, f.Seed, f.SizeX);
         waterEta = float.NaN;
         // The river continues up- and downstream beyond the grid: a channel towards the inlet/outlet.
         if (z < 0f || z > f.SizeZ)

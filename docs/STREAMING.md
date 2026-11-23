@@ -1,6 +1,6 @@
 # Endless streaming — plan
 
-*2026-11-23, Sage. Status: accepted; Tom's decisions in §9 (all four as recommended). Next: phase 0.*
+*2026-11-23, Sage. Status: accepted; Tom's decisions in §9 (all four as recommended). Phase 0 done (D12). Next: phase 1.*
 
 Today the world is one fixed 1.2 × 3.2 km reach laid along +z. This plan turns it into a river that never ends
 and can change direction, generated ahead of the raft and dropped behind it, with the water, terrain, raft

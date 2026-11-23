@@ -73,6 +73,17 @@ Console.WriteLine("Day cycle:");
     Check(Daylight.Evaluate(1f, 0f, true, 0f).Mist > 3f * Daylight.Evaluate(40f, 0f, false, 0f).Mist + 0.01f, "mist is thick at sunrise and gone by midday");
 }
 
+// ---------------------------------------------------------------- frames (fast)
+Console.WriteLine("Frames:");
+{
+    var fr = new Frame(123456.75, -98765.5, 0.7f);
+    var (wx, wz) = fr.ToWorld(310.25f, 1820.5f);
+    var (lx, lz) = fr.ToLocal(wx, wz);
+    Check(MathF.Abs(lx - 310.25f) < 1e-3f && MathF.Abs(lz - 1820.5f) < 1e-3f, $"grid → world → grid round-trips far from the origin ({lx:F4}, {lz:F4})");
+    var (ax, az) = fr.ToWorld(0f, 1f);
+    Check(Math.Abs(ax - fr.OriginX - MathF.Sin(0.7f)) < 1e-5 && Math.Abs(az - fr.OriginZ - MathF.Cos(0.7f)) < 1e-5, "the grid's +z points along the heading");
+}
+
 if (Array.IndexOf(args, "--sandbox-only") >= 0) { Console.WriteLine(failures == 0 ? "ALL PASS" : $"{failures} FAILED"); return failures == 0 ? 0 : 1; }
 
 var settings = new ReachSettings();
@@ -181,6 +192,10 @@ if (Array.IndexOf(args, "--reference") >= 0)
     }
     Console.WriteLine($"  vs reference: surface rms {Math.Sqrt(se / n) * 100:F1} cm, current rms {Math.Sqrt(sv / n):F3} m/s, worst {worst:F2} m/s");
 }
+
+// Fingerprint of the whole generated reach: refactors that must not change the river compare it before/after.
+// (Not a pass/fail check: floating-point maths can differ between platforms and .NET versions.)
+Console.WriteLine($"  fingerprint: {Fingerprint.Of(field):X16}");
 
 if (mapPath != null) { MapRender.Write(field, mapPath); Console.WriteLine($"map: {mapPath}"); }
 if (flowPath != null) { MapRender.WriteFlow(field, flowPath); Console.WriteLine($"flow map: {flowPath}"); }
@@ -296,5 +311,27 @@ static class Tangents
                     }
             }
         return (tx, tz);
+    }
+}
+
+static class Fingerprint
+{
+    /// <summary>FNV-1a over every field array, the centre lines, islands and rocks.</summary>
+    public static ulong Of(ReachField f)
+    {
+        ulong h = 14695981039346656037UL;
+        void B(byte b) { h ^= b; h *= 1099511628211UL; }
+        void F(float v) { foreach (var b in BitConverter.GetBytes(v)) B(b); }
+        void I(int v) { foreach (var b in BitConverter.GetBytes(v)) B(b); }
+        I(f.Nx); I(f.Nz); F(f.Cell);
+        foreach (var a in new[] { f.Height, f.Eta, f.Depth, f.VelX, f.VelZ, f.Foam, f.ShoreDist, f.Eddy })
+            foreach (var v in a) F(v);
+        foreach (var w in f.Water) B(w ? (byte)1 : (byte)0);
+        foreach (var c in new[] { f.Main, f.Tributary })
+            for (int k = 0; k < c.Count; k++) { F(c.X[k]); F(c.Z[k]); F(c.HalfLeft[k]); F(c.HalfRight[k]); F(c.MaxDepth[k]); }
+        foreach (var i in f.Islands) { F(i.X); F(i.Z); F(i.HalfWidth); F(i.LengthUp); F(i.LengthDown); I(i.Seed); }
+        foreach (var r in f.Rocks) { F(r.X); F(r.Z); F(r.Radius); F(r.Top); F(r.FlowX); F(r.FlowZ); }
+        F(f.EtaTrendA); F(f.EtaTrendB); F(f.OutflowMeasured);
+        return h;
     }
 }

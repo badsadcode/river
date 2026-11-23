@@ -17,6 +17,7 @@ public static class ReachCache
         using var w = new BinaryWriter(File.Create(path));
         w.Write(Magic); w.Write(key);
         w.Write(f.Nx); w.Write(f.Nz); w.Write(f.Cell); w.Write(f.Seed);
+        w.Write(f.Frame.OriginX); w.Write(f.Frame.OriginZ); w.Write(f.Frame.Heading);
         w.Write(f.EtaTrendA); w.Write(f.EtaTrendB); w.Write(f.OutflowMeasured); w.Write(f.InflowTotal);
         WriteBools(w, f.Water); WriteBools(w, f.Still);
         foreach (var a in new[] { f.Height, f.Eta, f.Depth, f.VelX, f.VelZ, f.Foam, f.ShoreDist, f.Eddy }) WriteFloats(w, a);
@@ -39,6 +40,7 @@ public static class ReachCache
             using var rd = new BinaryReader(File.OpenRead(path));
             if (rd.ReadInt32() != Magic || rd.ReadString() != key) return null;
             var f = new ReachField { Nx = rd.ReadInt32(), Nz = rd.ReadInt32(), Cell = rd.ReadSingle(), Seed = rd.ReadInt32() };
+            f.Frame = new Frame(rd.ReadDouble(), rd.ReadDouble(), rd.ReadSingle());
             f.EtaTrendA = rd.ReadSingle(); f.EtaTrendB = rd.ReadSingle(); f.OutflowMeasured = rd.ReadSingle(); f.InflowTotal = rd.ReadSingle();
             int n = f.Nx * f.Nz;
             f.Water = ReadBools(rd, n); f.Still = ReadBools(rd, n);

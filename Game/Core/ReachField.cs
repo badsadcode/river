@@ -20,6 +20,8 @@ public sealed class ReachField
 {
     public int Nx, Nz;
     public float Cell;
+    /// <summary>Where this grid sits in the world. All positions in the field are grid-local.</summary>
+    public Frame Frame = Frame.Identity;
     public float SizeX => (Nx - 1) * Cell;
     public float SizeZ => (Nz - 1) * Cell;
     public int Seed;
