@@ -18,6 +18,7 @@ uniform vec3 gravel : source_color = vec3(0.45, 0.42, 0.37);
 uniform vec3 rock : source_color = vec3(0.38, 0.37, 0.35);
 uniform vec3 silt : source_color = vec3(0.24, 0.21, 0.15);
 uniform float caustic_strength = 0.9;
+uniform float caustic_scale = 4.5;   // pattern frequency (the old 0.9 drew ~7 m cells)
 
 varying vec3 v_world;
 varying vec3 v_wnormal;
@@ -101,11 +102,15 @@ void fragment() {
 	float rough = mix(0.92, 0.35, wet);
 
 	ALBEDO = col;
-	ROUGHNESS = rough;
-	SPECULAR = 0.35;
+	// Under water the bed has no sun glint: sediment and water have nearly the same refractive index, so there is
+	// almost nothing to reflect (a glossy bed showed through the water as a green-yellow sun path).
+	float submerged = smoothstep(0.0, 0.04, under);
+	ROUGHNESS = mix(rough, 1.0, submerged);
+	SPECULAR = mix(0.35, 0.0, submerged);
 
 	if (under > 0.0) {
-		float c = caustics(p * 0.9, TIME) * caustic_strength * exp(-under * 0.6) * smoothstep(0.0, 0.2, under);
+		// Real river caustics are a fine net (decimetres to ~1 m), sharpest in the shallows, fading with depth.
+		float c = caustics(p * caustic_scale, TIME * 1.3) * caustic_strength * exp(-under * 0.9) * smoothstep(0.0, 0.15, under);
 		EMISSION = col * c * 0.8;
 	}
 }

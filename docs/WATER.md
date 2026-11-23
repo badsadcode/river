@@ -22,11 +22,22 @@ The river's look is driven by the same data that drives the raft: the reach fiel
    nothing the engine's sky reflection and sun glint take over (SPECULAR masked by the SSR hit). Fresnel ≈ 0.02 at
    normal incidence. Roughness grows with distance so the sun becomes a glittering path, not a disc.
 5. **Foam** — coverage from the field (rocks, riffles, current pushing into shores, eddy lines; advected with the
-   current, lingering in backwaters) plus a
-   thin lap line at the bank; drawn as a bubbly net carried by the flow and streaks stretched along the current.
-   Coverage is capped so it is never a solid white sheet.
+   current, lingering in backwaters) plus a thin lap line at the bank. The foam texture (ProceduralTextures.Foam)
+   is cloudy domain-warped noise (R) plus small bubbles (G), histogram-equalised so coverage c whitens about a
+   fraction c. Large drifting patches break it into clumps; `foam_max` caps it. Not paint: thin foam is a
+   translucent bubbly lace, only thick cores are near-opaque, it is off-white with brighter and greyer parts, and its
+   relief tilts the normal so the sun shades its lumps.
 6. **Edge** — alpha fades over the last ~15 cm of thickness so shorelines aren't hard cuts.
+7. **Waves** (vertex shader) — swell, chop in rough water and *standing waves* in fast water (stationary crests,
+   wavelength 2πv²/g), on a 1 m mesh. Same function as the raft's buoyancy: `Core/SurfaceWaves.cs` mirrored by
+   `wave_height` in the shader, clocked by `Raft.WaveTime`. Change both together.
+8. **Riverbed** (Terrain.gdshader) — matte under water (a glossy bed showed through as a green-yellow sun path);
+   caustics ~1 m (`caustic_scale`).
 
 ## Knobs worth trying
 `absorption`, `scatter_color`, `turbidity` (river character: clear highland stream ↔ muddy lowland river),
-`ripple_strength`, `flow_cycle`, `wind`, `refraction_strength`, `ssr_steps`.
+`ripple_strength`, `flow_cycle`, `wind`, `refraction_strength`, `ssr_steps`, `foam_scale`, `foam_cycle`,
+`foam_max`, `foam_bump`, `foam_color`, `wave_strength`.
+
+Tuning without rebuilding: captures accept `--water=name=value;name=value` (water uniforms), `--nomist`, and
+`--water=debug_view=1|2|3` (engine lighting / emission / albedo only). Foam shots: `foam_close`, `bar`, `eddy`.

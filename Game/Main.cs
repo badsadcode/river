@@ -120,6 +120,15 @@ public partial class Main : Node3D
         Player.Setup(Raft);
 
         if (_args.TryGetValue("time", out var t)) Env.ApplyPreset(int.Parse(t) % EnvironmentRig.PresetNames.Length);
+        // Debug/tuning: --water=name=value;name=value overrides water shader uniforms (floats), --nomist hides the mist.
+        if (_args.TryGetValue("water", out var wset))
+            foreach (var kv in wset.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var p = kv.Split('=', 2);
+                if (p.Length != 2) continue;
+                if (int.TryParse(p[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int iv)) WaterMaterial.SetShaderParameter(p[0], iv);
+                else WaterMaterial.SetShaderParameter(p[0], float.Parse(p[1], CultureInfo.InvariantCulture));
+            }
 
         AddChild(new Hud { Name = "Hud" });
         _status.Visible = false;
@@ -127,6 +136,12 @@ public partial class Main : Node3D
         if (_args.ContainsKey("drift-test")) { _ = DriftTest(float.Parse(_args["drift-test"], CultureInfo.InvariantCulture)); return; }
         if (_args.ContainsKey("shot") || _args.ContainsKey("shots") || _args.ContainsKey("cam")) _ = Capture();
         else Player.Activate();
+    }
+
+    public override void _Process(double delta)
+    {
+        // The visible waves run on the raft's physics clock, so the raft rides exactly the waves on screen.
+        if (WaterMaterial != null && Raft != null) WaterMaterial.SetShaderParameter("wave_time", Raft.WaveTime);
     }
 
     // ------------------------------------------------------------------ camera presets for screenshots
@@ -205,6 +220,14 @@ public partial class Main : Node3D
             // "bar" = the gravel bar in the meanders (faster water: foam on the eddy line).
             case "eddy": WakeShot(f.Islands[Math.Min(2, f.Islands.Count - 1)], 38f, 22f, 16f); break;
             case "bar": WakeShot(f.Islands[Math.Min(4, f.Islands.Count - 1)], 26f, 8f, 30f); break;
+            case "foam_close":
+            {
+                // Standing in the riffle (as if on the raft), looking down and ahead at the foam from 2.5 m.
+                int i = m.IndexAtZ(2840f);
+                int j = i + 6;
+                FlyCam.LookAtPoint(W(m.X[i], m.Z[i], 2.5f), W(m.X[j], m.Z[j], 0f));
+                break;
+            }
             case "water_close":
             {
                 int i = m.IndexAtZ(420f);
@@ -257,6 +280,7 @@ public partial class Main : Node3D
             var parts = entry.Split('@');
             string name = parts[0];
             if (parts.Length > 1) Env.ApplyPreset(int.Parse(parts[1]) % EnvironmentRig.PresetNames.Length);
+            if (_args.ContainsKey("nomist")) Env.Mist.Visible = false;
             if (name == "cam" && _args.TryGetValue("cam", out var c))
             {
                 var p = Array.ConvertAll(c.Split(','), s => float.Parse(s, CultureInfo.InvariantCulture));

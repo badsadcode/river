@@ -45,18 +45,24 @@ public static class WaterBuilder
 
     static bool WetEnough(ReachField f, int i) => f.Water[i] || f.ShoreDist[i] < 5f;
 
+    /// <summary>Quads per field cell along each axis: 2 → a 1 m mesh, fine enough to draw riffle standing waves
+    /// (≥ 2.5 m) that the vertex shader displaces.</summary>
+    const int Sub = 2;
+
     static ArrayMesh ChunkMesh(ReachField f, int cx, int cz, int w, int h)
     {
         var verts = new List<Vector3>();
-        var map = new Dictionary<int, int>();
+        var map = new Dictionary<long, int>();
         var idx = new List<int>();
-        int V(int gx, int gz)
+        int stride = (f.Nx - 1) * Sub + 1;
+        int V(int sx, int sz)   // sub-grid vertex
         {
-            int i = gz * f.Nx + gx;
-            if (map.TryGetValue(i, out int v)) return v;
+            long key = (long)sz * stride + sx;
+            if (map.TryGetValue(key, out int v)) return v;
             v = verts.Count;
-            verts.Add(new Vector3(gx * f.Cell, f.Eta[i], gz * f.Cell));
-            map[i] = v;
+            float x = sx * f.Cell / Sub, z = sz * f.Cell / Sub;
+            verts.Add(new Vector3(x, f.SampleEta(x, z), z));
+            map[key] = v;
             return v;
         }
         for (int z = cz; z < cz + h; z++)
@@ -64,8 +70,13 @@ public static class WaterBuilder
             {
                 int i00 = z * f.Nx + x;
                 if (!(WetEnough(f, i00) || WetEnough(f, i00 + 1) || WetEnough(f, i00 + f.Nx) || WetEnough(f, i00 + f.Nx + 1))) continue;
-                int a = V(x, z), b = V(x + 1, z), c = V(x, z + 1), d = V(x + 1, z + 1);
-                idx.Add(a); idx.Add(b); idx.Add(d); idx.Add(a); idx.Add(d); idx.Add(c);
+                for (int qz = 0; qz < Sub; qz++)
+                    for (int qx = 0; qx < Sub; qx++)
+                    {
+                        int sx = x * Sub + qx, sz = z * Sub + qz;
+                        int a = V(sx, sz), b = V(sx + 1, sz), c = V(sx, sz + 1), d = V(sx + 1, sz + 1);
+                        idx.Add(a); idx.Add(b); idx.Add(d); idx.Add(a); idx.Add(d); idx.Add(c);
+                    }
             }
         if (idx.Count == 0) return null;
         var norms = new Vector3[verts.Count];

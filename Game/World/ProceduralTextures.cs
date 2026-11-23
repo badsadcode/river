@@ -63,40 +63,68 @@ public static class ProceduralTextures
     }
 
     /// <summary>
-    /// Foam pattern: a net of bubbles and lace (inverted cellular noise with fine speckle), 0..1 in R.
-    /// Thresholding it at different levels gives anything from scattered flecks to dense whitewater.
+    /// Foam pattern, tileable. R: cloudy foam density (domain-warped fBm mixed with billowy noise: soft lumps with
+    /// creases, no cell structure). G: small round bubbles, for thin foam. Both channels are histogram-equalised,
+    /// so thresholding at 1 − c covers a fraction c of the surface: the shader's coverage means what it says.
     /// </summary>
     public static ImageTexture Foam(int size, int seed)
     {
-        const int cells = 16;
-        var img = Image.CreateEmpty(size, size, true, Image.Format.L8);
-        var pts = new Vector2[cells * cells];
-        var rng = new River.Core.Rng(seed);
-        for (int i = 0; i < pts.Length; i++) pts[i] = new Vector2(rng.Next01(), rng.Next01());
-        var val = new float[size * size];
+        var cloud = new float[size * size];
+        var bubbles = new float[size * size];
         System.Threading.Tasks.Parallel.For(0, size, y =>
         {
             for (int x = 0; x < size; x++)
             {
-                float fx = x * cells / (float)size, fy = y * cells / (float)size;
-                int cx = (int)fx, cy = (int)fy;
-                float d1 = 9f, d2 = 9f;
-                for (int oy = -1; oy <= 1; oy++)
-                    for (int ox = -1; ox <= 1; ox++)
-                    {
-                        int gx = cx + ox, gy = cy + oy;
-                        var p = pts[((gy % cells + cells) % cells) * cells + ((gx % cells + cells) % cells)];
-                        float dx = gx + p.X - fx, dy = gy + p.Y - fy, d = MathF.Sqrt(dx * dx + dy * dy);
-                        if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
-                    }
-                float edge = 1f - River.Core.MathUtil.Smoothstep(0f, 0.28f, d2 - d1);   // lace along cell borders
-                float fine = PNoise(x * 32f / size, y * 32f / size, 32, seed + 5) * 0.5f + 0.5f;
-                float blob = PNoise(x * 4f / size, y * 4f / size, 4, seed + 9) * 0.5f + 0.5f;
-                val[y * size + x] = Math.Clamp(edge * 0.6f + fine * 0.3f + blob * 0.35f - 0.1f, 0f, 1f);
+                float u = x / (float)size, v = y / (float)size;
+                // Domain warp: bends the lumps into curdled, drifting shapes.
+                float wx = PNoise(u * 4f, v * 4f, 4, seed + 1), wy = PNoise(u * 4f + 17.3f, v * 4f + 5.1f, 4, seed + 2);
+                float uu = u + wx * 0.06f, vv = v + wy * 0.06f;
+                float fbm = 0f, billow = 0f, amp = 1f, norm = 0f;
+                int period = 4;
+                for (int o = 0; o < 5; o++)
+                {
+                    float n = PNoise(uu * period, vv * period, period, seed + 10 + o * 31);
+                    fbm += n * amp;
+                    billow += (1f - 2f * MathF.Abs(n)) * amp;   // puffy, with fine creases between puffs
+                    norm += amp; amp *= 0.5f; period *= 2;
+                }
+                cloud[y * size + x] = 0.55f * fbm / norm + 0.45f * billow / norm;
             }
         });
-        for (int y = 0; y < size; y++) for (int x = 0; x < size; x++) img.SetPixel(x, y, new Color(val[y * size + x], 0, 0));
+        // Bubbles: ~12k random small discs (radius 0.8–3.4 px), brighter at the rim like real bubbles.
+        {
+            var rng = new River.Core.Rng(seed + 99);
+            for (int c = 0; c < 12000; c++)
+            {
+                float cx = rng.Next01() * size, cy = rng.Next01() * size, r = 0.8f + 2.6f * rng.Next01() * rng.Next01();
+                int x0 = (int)MathF.Floor(cx - r - 1), x1 = (int)MathF.Ceiling(cx + r + 1);
+                int y0 = (int)MathF.Floor(cy - r - 1), y1 = (int)MathF.Ceiling(cy + r + 1);
+                for (int iy = y0; iy <= y1; iy++)
+                    for (int ix = x0; ix <= x1; ix++)
+                    {
+                        float dx = ix + 0.5f - cx, dy = iy + 0.5f - cy, d = MathF.Sqrt(dx * dx + dy * dy);
+                        float k = River.Core.MathUtil.Smoothstep(r, r - 0.9f, d) * (0.6f + 0.4f * River.Core.MathUtil.Smoothstep(0f, r, d));
+                        int i = ((iy % size + size) % size) * size + ((ix % size + size) % size);   // wraps: tileable
+                        bubbles[i] = MathF.Max(bubbles[i], k);
+                    }
+            }
+        }
+        Equalize(cloud);
+        var img = Image.CreateEmpty(size, size, true, Image.Format.Rg8);
+        for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+                img.SetPixel(x, y, new Color(cloud[y * size + x], bubbles[y * size + x], 0));
         img.GenerateMipmaps();
         return ImageTexture.CreateFromImage(img);
+    }
+
+    /// <summary>Replaces each value by its rank (0..1): a uniform distribution with the same shapes.</summary>
+    static void Equalize(float[] a)
+    {
+        var order = new int[a.Length];
+        for (int i = 0; i < order.Length; i++) order[i] = i;
+        var keys = (float[])a.Clone();
+        Array.Sort(keys, order);
+        for (int r = 0; r < order.Length; r++) a[order[r]] = r / (float)(order.Length - 1);
     }
 }

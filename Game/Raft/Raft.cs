@@ -55,6 +55,9 @@ public partial class Raft : RigidBody3D
     float _oarAngle;
     float _time;
 
+    /// <summary>The wave clock: the water shader is fed this, so the waves you see are the ones the raft rides.</summary>
+    public float WaveTime => _time;
+
     public void Setup(ReachField field, Vector3 position, float yaw)
     {
         Field = field;
@@ -103,21 +106,12 @@ public partial class Raft : RigidBody3D
     /// <summary>Bed height (for poling, anchoring, grounding).</summary>
     public float BedHeight(float x, float z) => Field.InDomain(x, z) ? Field.SampleHeight(x, z) : Field.EtaTrend(z) - 3f;
 
-    /// <summary>Gentle waves for bobbing: a few long ripples everywhere, choppier where the water is fast and shallow.</summary>
+    /// <summary>The same small waves the water mesh shows (Core/SurfaceWaves.cs): swell, chop, standing waves.</summary>
     float SmallWaves(float x, float z, float t)
     {
-        float chop = 0f;
-        if (Field.InDomain(x, z))
-        {
-            var (vx, vz) = Field.SampleVelocity(x, z);
-            float d = MathF.Max(Field.SampleDepth(x, z), 0.1f);
-            float fr = MathF.Sqrt(vx * vx + vz * vz) / MathF.Sqrt(G * d);
-            chop = MathUtil.Smoothstep(0.35f, 0.9f, fr);
-        }
-        float w = 0.018f * MathF.Sin(x * 0.31f + t * 1.7f) + 0.014f * MathF.Sin(z * 0.27f - t * 1.3f + 1.3f)
-                + 0.010f * MathF.Sin((x + z) * 0.53f + t * 2.3f);
-        w += chop * (0.06f * MathF.Sin(x * 1.1f + t * 3.1f) + 0.05f * MathF.Sin(z * 1.4f - t * 3.7f));
-        return w;
+        if (!Field.InDomain(x, z)) return SurfaceWaves.Height(x, z, t, 0f, 0.6f, 3f);
+        var (vx, vz) = Field.SampleVelocity(x, z);
+        return SurfaceWaves.Height(x, z, t, vx, vz, Field.SampleDepth(x, z));
     }
 
     // ------------------------------------------------------------------ controls

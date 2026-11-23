@@ -34,22 +34,60 @@ uniform vec3 absorption = vec3(0.40, 0.31, 0.66);    // per metre of path, rgb: 
 uniform vec3 scatter_color : source_color = vec3(0.10, 0.10, 0.055);
 uniform float scatter_density = 0.55;                 // per metre
 uniform float turbidity = 1.0;
-uniform vec3 foam_color : source_color = vec3(0.86, 0.87, 0.84);
+uniform vec3 foam_color : source_color = vec3(0.80, 0.79, 0.74);   // river foam is off-white, a little creamy
+uniform float foam_bump = 6.0;     // how strongly foam lumps catch the light
+uniform float foam_scale = 4.0;   // metres per foam texture tile
+uniform float foam_cycle = 3.2;   // seconds per flow-map phase for foam (long: foam keeps its shape while it drifts)
+uniform float foam_max = 0.6;     // at most this share of the surface is white, even in the wildest riffle
 
 uniform float refraction_strength = 0.035;
 uniform int ssr_steps = 40;
 uniform float ssr_strength = 1.0;
 uniform float time_offset = 0.0;
 uniform float roughness_boost = 0.0;  // set by the day cycle (softer glints at night)
+uniform int debug_view = 0;
+
+// Waves (vertex displacement): the raft's physics clock and strength (see wave_height).
+uniform float wave_time = 0.0;
+uniform float wave_strength = 1.0;
 
 varying vec3 v_world;
-
-void vertex() {
-	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-}
+varying vec2 v_wave_grad;
 
 vec2 field_uv(vec2 xz) {
 	return (xz / field_cell + 0.5) / field_size;
+}
+
+// Mirror of Game/Core/SurfaceWaves.cs Height(): keep the two identical, the raft floats on the C# copy.
+float wave_height(vec2 p, float t, vec2 v, float depth) {
+	float speed = length(v);
+	float fr = speed / sqrt(9.81 * max(depth, 0.08));
+	float rough = smoothstep(0.35, 0.9, fr);
+	float shallow_fade = smoothstep(0.05, 0.5, depth);
+	float h = 0.018 * sin(p.x * 0.31 + t * 1.7) + 0.014 * sin(p.y * 0.27 - t * 1.3 + 1.3)
+	        + 0.010 * sin((p.x + p.y) * 0.53 + t * 2.3);
+	h += rough * (0.05 * sin(p.x * 1.1 + t * 3.1) + 0.04 * sin(p.y * 1.4 - t * 3.7));
+	if (speed > 0.3) {
+		vec2 d = v / speed;
+		float along = dot(p, d), across = -p.x * d.y + p.y * d.x;
+		float k = clamp(9.81 / (speed * speed), 6.2831853 / 8.0, 6.2831853 / 2.5);
+		float amp = 0.13 * smoothstep(0.45, 1.0, fr);
+		float breakup = 0.55 + 0.45 * sin(across * 0.9 + 1.7 * sin(along * 0.23));
+		h += amp * breakup * sin(along * k + 0.25 * sin(t * 1.9 + across * 0.4));
+	}
+	return h * shallow_fade;
+}
+
+void vertex() {
+	vec3 w = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	vec4 f = textureLod(flow_tex, field_uv(w.xz), 0.0);
+	const float e = 0.3;
+	float h = wave_height(w.xz, wave_time, f.xy, f.z);
+	float hx = wave_height(w.xz + vec2(e, 0.0), wave_time, f.xy, f.z);
+	float hz = wave_height(w.xz + vec2(0.0, e), wave_time, f.xy, f.z);
+	v_wave_grad = vec2(hx - h, hz - h) / e * wave_strength;
+	VERTEX.y += h * wave_strength;   // water meshes are built in world space (identity model matrix)
+	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
 vec3 view_pos_at(vec2 uv, mat4 inv_proj) {
@@ -78,6 +116,15 @@ float flow_scalar(sampler2D tex, vec2 xz, vec2 flow, float scale, float cycle, f
 	float w0 = 1.0 - abs(1.0 - 2.0 * p0);
 	float a = texture(tex, (xz - flow * p0 * cycle) / scale).r;
 	float b = texture(tex, (xz - flow * p1 * cycle) / scale + vec2(0.53, 0.19)).r;
+	return mix(b, a, w0);
+}
+
+vec2 flow_rg(sampler2D tex, vec2 xz, vec2 flow, float scale, float cycle, float t, float jitter) {
+	float p0 = fract(t / cycle + jitter);
+	float p1 = fract(t / cycle + jitter + 0.5);
+	float w0 = 1.0 - abs(1.0 - 2.0 * p0);
+	vec2 a = texture(tex, (xz - flow * p0 * cycle) / scale).rg;
+	vec2 b = texture(tex, (xz - flow * p1 * cycle) / scale + vec2(0.53, 0.19)).rg;
 	return mix(b, a, w0);
 }
 
@@ -113,6 +160,8 @@ void fragment() {
 	float flow_k = ripple_strength * (0.45 + 0.9 * smoothstep(0.1, 1.6, speed) + 1.2 * rough_water);
 	vec3 n_ts = blend_n(vec3(nL.xy * flow_k, nL.z), vec3(nS.xy * flow_k * 0.8, nS.z));
 	n_ts = blend_n(n_ts, vec3((nW.xy + nW2.xy) * 0.35 * wind_k, 1.0));
+	// The displaced waves' own slope (standing waves in riffles, chop, swell).
+	n_ts = blend_n(n_ts, vec3(-v_wave_grad, 1.0));
 	// Calm the very edge (thin water hugging the bank is smooth).
 	n_ts.xy *= mix(0.35, 1.0, smoothstep(-0.2, -3.0, shore));
 	n_ts = normalize(n_ts);
@@ -181,28 +230,35 @@ void fragment() {
 	}
 
 	// ------------------------------------------------------------- foam
-	// Coverage from the field (rocks, riffles, current against shores) plus a thin lap line at the bank.
+	// How much of the surface is foam comes from the field (rocks, riffles, current against shores, eddy lines,
+	// advected with the current) plus a thin lap line at the bank. The foam texture is equalised, so a coverage c
+	// whitens about a fraction c of the surface.
 	float foam_field = fl.w;
-	float lap = (1.0 - smoothstep(0.0, 0.8, -shore)) * (0.12 + 0.3 * smoothstep(0.15, 1.0, speed));
-	float churn = rough_water * 0.45;
-	float coverage = clamp(foam_field * 0.8 + lap + churn, 0.0, 1.0) * 0.8;   // never a solid sheet
-	// Bubbly net carried by the flow, and streaks stretched along the current.
-	float fpat = flow_scalar(foam_tex, xz, flow, 3.0, flow_cycle * 1.3, t, jitter);
-	vec2 fdir = speed > 0.02 ? flow / speed : vec2(0.0, 1.0);
-	vec2 fr = vec2(dot(xz, vec2(-fdir.y, fdir.x)), dot(xz, fdir));
-	float sp0 = fract(t / (flow_cycle * 1.6) + jitter), sp1 = fract(t / (flow_cycle * 1.6) + jitter + 0.5);
-	float sw = 1.0 - abs(1.0 - 2.0 * sp0);
-	float s0 = texture(foam_tex, vec2(fr.x, (fr.y - speed * sp0 * flow_cycle * 1.6) * 0.22) / 4.5).r;
-	float s1 = texture(foam_tex, vec2(fr.x, (fr.y - speed * sp1 * flow_cycle * 1.6) * 0.22) / 4.5 + vec2(0.31, 0.77)).r;
-	float streak = mix(s1, s0, sw);
-	float pattern = fpat * 0.55 + streak * 0.6;
-	float th = 1.05 - coverage;
-	float foam = smoothstep(th, th + 0.14, pattern) * smoothstep(0.03, 0.2, coverage);
+	float lap = (1.0 - smoothstep(0.0, 0.6, -shore)) * (0.08 + 0.22 * smoothstep(0.15, 1.0, speed));
+	float coverage = foam_field * 0.7 + lap + rough_water * 0.15;
+	// Large, slowly drifting patches: foam comes in clumps and rafts, never as an even sheet.
+	float patch = flow_scalar(foam_tex, xz, flow, 38.0, foam_cycle * 3.0, t, jitter);
+	coverage = clamp(coverage * mix(0.35, 1.3, patch), 0.0, foam_max);
+	// Cloudy foam carried by the current, its edges broken up by a finer layer; bubbles in the thin parts.
+	vec2 fa = flow_rg(foam_tex, xz, flow, foam_scale, foam_cycle, t, jitter);
+	vec2 fb = flow_rg(foam_tex, xz, flow, foam_scale * 0.29, foam_cycle * 0.8, t, jitter + 0.37);
+	float pattern = fa.x + (fb.x - 0.5) * 0.3;
+	float th = 1.0 - coverage;
+	// Not paint: thin foam is a see-through lace of bubbles, only the thickest cores are nearly opaque, and the
+	// colour varies (bright where bubbles catch light, greyer in thin and creased foam).
+	float present = smoothstep(th, th + 0.12, pattern);
+	float density = smoothstep(th, th + 0.45, pattern);
+	float lace = mix(0.35, 1.0, max(fb.y, density * density));
+	float foam = present * (0.3 + 0.62 * density) * lace * smoothstep(0.01, 0.06, coverage);
+	vec3 foam_albedo = foam_color * (0.62 + 0.38 * density) * mix(0.82, 1.0, fb.y);
+	// Lumpy surface: tilt the normal along the foam's own relief so the sun shades its bumps.
+	vec2 fg = vec2(dFdx(pattern), dFdy(pattern)) / (1.0 + dist * 0.08);
+	NORMAL = normalize(NORMAL + vec3(-fg * foam_bump * present, 0.0));
 
 	// ------------------------------------------------------------- compose
 	float refl_w = fresnel;
 	vec3 body = scatter_color * scatter_amt;
-	ALBEDO = mix(body * (1.0 - refl_w), foam_color, foam);
+	ALBEDO = mix(body * (1.0 - refl_w), foam_albedo, foam);
 	EMISSION = (through * (1.0 - refl_w) + ssr_col * refl_w * ssr_mask) * (1.0 - foam);
 	SPECULAR = mix(0.35 * (1.0 - ssr_mask), 0.1, foam);
 	// Far away, ripples smaller than a pixel widen the sun's reflection into a glittering path.
@@ -211,4 +267,8 @@ void fragment() {
 	METALLIC = 0.0;
 	// Fade the last centimetres into the bank so the shoreline isn't a hard cut.
 	ALPHA = clamp(thickness * 6.0, 0.0, 1.0);
+	// Debug views (tuning): 1 = engine lighting only (sun glint, sky), 2 = emission only (bed + SSR), 3 = albedo only.
+	if (debug_view == 1) { ALBEDO = vec3(0.0); EMISSION = vec3(0.0); }
+	if (debug_view == 2) { ALBEDO = vec3(0.0); SPECULAR = 0.0; }
+	if (debug_view == 3) { EMISSION = vec3(0.0); SPECULAR = 0.0; }
 }
