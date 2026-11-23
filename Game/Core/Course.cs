@@ -29,6 +29,38 @@ public sealed class CourseSettings
 
 public enum FeatureKind { Lake, Split, Riffle, Confluence }
 
+/// <summary>
+/// The character of a stretch of river, a few km long (blended into the next over 500 m): how strongly and how
+/// regularly it meanders, how wide and deep it runs.
+/// </summary>
+public enum ReachKind { Meander, Lazy, Straight, Wide }
+
+public readonly record struct Reach(ReachKind Kind, double S0, double S1);
+
+/// <summary>Numbers behind a <see cref="ReachKind"/> (blended between reaches).</summary>
+public struct ReachParams
+{
+    public float AmpBase, AmpVar;       // meander amplitude (radians) = AmpBase + AmpVar × noise
+    public float Wavelength;            // × the usual meander wavelength
+    public float Width, Depth;          // × the usual hydraulic width and depth
+    public float Irregular;             // extra wandering of the heading (noise weight)
+
+    public static ReachParams Of(ReachKind k) => k switch
+    {
+        ReachKind.Meander => new ReachParams { AmpBase = 1.45f, AmpVar = 1.0f, Wavelength = 1.0f, Width = 1.0f, Depth = 1.0f, Irregular = 0.25f },
+        ReachKind.Lazy => new ReachParams { AmpBase = 0.95f, AmpVar = 0.8f, Wavelength = 1.5f, Width = 1.05f, Depth = 1.0f, Irregular = 0.6f },
+        ReachKind.Straight => new ReachParams { AmpBase = 0.3f, AmpVar = 0.3f, Wavelength = 1.3f, Width = 0.92f, Depth = 1.1f, Irregular = 0.35f },
+        _ => new ReachParams { AmpBase = 0.8f, AmpVar = 0.6f, Wavelength = 1.3f, Width = 1.6f, Depth = 0.62f, Irregular = 0.4f },   // Wide
+    };
+
+    public static ReachParams Lerp(in ReachParams a, in ReachParams b, float t) => new()
+    {
+        AmpBase = a.AmpBase + (b.AmpBase - a.AmpBase) * t, AmpVar = a.AmpVar + (b.AmpVar - a.AmpVar) * t,
+        Wavelength = a.Wavelength + (b.Wavelength - a.Wavelength) * t, Width = a.Width + (b.Width - a.Width) * t,
+        Depth = a.Depth + (b.Depth - a.Depth) * t, Irregular = a.Irregular + (b.Irregular - a.Irregular) * t,
+    };
+}
+
 /// <summary>A feature placed along the valley (σ = distance along the valley axis, m).</summary>
 public readonly record struct CourseFeature(FeatureKind Kind, double S0, double S1, float Ramp, int Side, float Size, int Seed)
 {
@@ -70,6 +102,7 @@ public sealed class Course
     public readonly List<float> Offset = new();            // signed distance from the valley axis (+ = valley's right, +x when heading south)
 
     public readonly List<CourseFeature> Features = new();
+    public readonly List<Reach> Reaches = new();            // the river's changing character along σ
     public readonly List<double> Cuts = new() { 0.0 };     // segment boundaries along σ
 
     public int Count => X.Count;
@@ -94,6 +127,7 @@ public sealed class Course
     {
         // Order matters: cuts need the features around them, the valley and river need both.
         ScheduleFeatures(sigma + 2.0 * Settings.MaxSegment + 3000.0);
+        ScheduleReaches(sigma + 2.0 * Settings.MaxSegment + 3000.0);
         ScheduleCuts(sigma + Settings.MaxSegment + 1000.0);
         ExtendValley(sigma + Settings.MaxSegment + 2000.0);
         if (Count == 0) StartRiver();
@@ -133,6 +167,37 @@ public sealed class Course
             Features.Add(f);
             _scheduledTo = f.S1;
         }
+    }
+
+    // ================================================================ reaches
+
+    /// <summary>Reaches of 2–6 km, one after another: tight meanders 35 %, lazy bends 30 %, near-straight 15 %, wide 20 %.</summary>
+    void ScheduleReaches(double upTo)
+    {
+        while (Reaches.Count == 0 || Reaches[^1].S1 < upTo)
+        {
+            int e = Reaches.Count;
+            float H(int k) => Noise.Hash01(e, k, Settings.Seed + 811);
+            double s0 = e == 0 ? -1000.0 : Reaches[^1].S1;
+            float pick = H(1);
+            var kind = pick < 0.35f ? ReachKind.Meander : pick < 0.65f ? ReachKind.Lazy : pick < 0.8f ? ReachKind.Straight : ReachKind.Wide;
+            if (e > 0 && kind == Reaches[^1].Kind) kind = (ReachKind)(((int)kind + 1 + (int)(H(2) * 3f)) % 4);   // a change
+            Reaches.Add(new Reach(kind, s0, s0 + 2000.0 + 4000.0 * H(0)));
+        }
+    }
+
+    /// <summary>The river's character at σ: its reach's, blended from the previous reach over the first 500 m.</summary>
+    public ReachParams ReachAt(double sigma)
+    {
+        for (int i = Reaches.Count - 1; i >= 0; i--)
+        {
+            if (Reaches[i].S0 > sigma) continue;
+            var cur = ReachParams.Of(Reaches[i].Kind);
+            if (i == 0) return cur;
+            float t = MathUtil.Smoothstep(0f, 500f, (float)(sigma - Reaches[i].S0));
+            return ReachParams.Lerp(ReachParams.Of(Reaches[i - 1].Kind), cur, t);
+        }
+        return ReachParams.Of(ReachKind.Meander);
     }
 
     float FeatureWeight(FeatureKind kind, double sigma)
@@ -227,10 +292,14 @@ public sealed class Course
     void StartRiver()
     {
         X.Add(VX[0]); Z.Add(VZ[0]); _vIdx = 0;
-        AddSample(0.0, 0f, VHeading[0]);
+        AddSample(0.0, 0f, VHeading[0], 0f);
     }
 
-    void AddSample(double sigma, float offset, float heading)
+    /// <summary>Hydraulic half-width for the discharge (∝ Q^0.5, capped for the 1.2 km corridor), × the reach's width.</summary>
+    float BaseHalf(float q, in ReachParams reach) => MathF.Min(60f, 18f * MathF.Sqrt(q / Settings.StartDischarge)) * reach.Width;
+
+    /// <param name="turn">−1 … 1: how sharply the river turns here (1 at a bend's apex), + turning left (inner bank left).</param>
+    void AddSample(double sigma, float offset, float heading, float turn)
     {
         var s = Settings;
         float lake = FeatureWeight(FeatureKind.Lake, sigma);
@@ -238,10 +307,17 @@ public sealed class Course
         float split = FeatureWeight(FeatureKind.Split, sigma);
         float q = DischargeAt(sigma);
         float qr = q / s.StartDischarge;
+        var reach = ReachAt(sigma);
 
-        // Hydraulic geometry: width ∝ Q^0.5, depth ∝ Q^0.35 (capped: the corridor is 1.2 km wide for now).
-        float baseHalf = MathF.Min(60f, 18f * MathF.Sqrt(qr)) * (1f + 0.12f * Noise.Fbm1(_sAlong / 300f, s.Seed + 3));
-        float hl = baseHalf, hr = baseHalf;
+        // Width that breathes: on two scales, wider pools at bend apexes, narrower crossings between bends, and now and
+        // then a pinch (narrower, deeper, faster). At an apex the inner side gives way to a point bar and the outer
+        // side scours wider. (Lakes and splits shape their own widths.)
+        float apex = MathF.Abs(turn), plain = (1f - lake) * (1f - split);
+        float breathe = 1f + 0.18f * Noise.Fbm1(_sAlong / 160f, s.Seed + 3) + 0.14f * Noise.Fbm1(_sAlong / 650f, s.Seed + 4);
+        float pinch = MathUtil.Smoothstep(0.16f, 0.3f, Noise.Fbm1((float)sigma / 1300f, s.Seed + 21)) * plain;
+        float baseHalf = BaseHalf(q, reach) * breathe * (0.94f + 0.16f * apex) * (1f - 0.35f * pinch);
+        float inner = 1f - 0.22f * apex * plain, outer = 1f + 0.12f * apex * plain;
+        float hl = baseHalf * (turn > 0f ? inner : outer), hr = baseHalf * (turn > 0f ? outer : inner);
         foreach (var f in Features)
         {
             if (f.Kind != FeatureKind.Lake) continue;
@@ -252,7 +328,9 @@ public sealed class Course
         }
         hl += 17f * split; hr += 17f * split;
         hl *= 1f - 0.1f * riffle; hr *= 1f - 0.1f * riffle;
-        float depth = MathF.Min(6f, 2.6f * MathF.Pow(qr, 0.35f)) * (1f + 0.1f * Noise.Fbm1(_sAlong / 220f, s.Seed + 7));
+        float depth = MathF.Min(6f, 2.6f * MathF.Pow(qr, 0.35f)) * (1f + 0.1f * Noise.Fbm1(_sAlong / 220f, s.Seed + 7))
+                    * reach.Depth * (1f + 0.15f * apex * plain) * (1f + 0.35f * pinch);   // pools at bends, deep in pinches
+        hl = MathF.Max(hl, 6f); hr = MathF.Max(hr, 6f);
         depth = MathUtil.Lerp(depth, 2f * depth, lake);
         depth = MathUtil.Lerp(depth, 1.05f, riffle);
 
@@ -298,32 +376,37 @@ public sealed class Course
         float offset = Offset[^1];
         float lake = FeatureWeight(FeatureKind.Lake, sigma);
         float riffle = FeatureWeight(FeatureKind.Riffle, sigma);
-        float baseHalf = 0.5f * (HalfLeft[^1] + HalfRight[^1]) * (1f - 0.9f * lake);   // a lake doesn't stretch the meanders
+        var reach = ReachAt(sigma);
+        // The meanders' scale: the hydraulic width for the discharge and reach (not the breathing width, which would
+        // feed back into the bends); a lake doesn't stretch the meanders.
+        float baseHalf = BaseHalf(Discharge[^1], reach) * (1f - 0.9f * lake);
         baseHalf = MathF.Max(baseHalf, 0.8f * MathF.Min(60f, 18f * MathF.Sqrt(Discharge[^1] / s.StartDischarge)));
 
-        // Kinoshita meanders, as in the prototype, relative to the valley.
+        // Kinoshita meanders, as in the prototype, relative to the valley; the reach sets how strong and regular.
         float straight = CutWeight(sigma);   // runs straighter through segment cuts
-        // Over a whole journey the prototype's narrow ranges read as a regular spring: here loops vary from
-        // lazy bends to tight loops (amplitude) and from short to long (wavelength), on two scales.
         float ampNoise = 0.8f * Noise.Fbm1(_sAlong / 900f, s.Seed + 11) + 0.35f * Noise.Fbm1(_sAlong / 260f, s.Seed + 15);
-        float amp = Math.Clamp(1.35f + ampNoise, 0.55f, 1.95f)
+        float amp = Math.Clamp(reach.AmpBase + reach.AmpVar * ampNoise, 0.15f, 1.95f)
                   * (1f - 0.92f * lake) * (1f - 0.6f * riffle) * (1f - 0.85f * straight);
         // Along the river (not the valley): ×16 widths here ≈ 10–14 widths along the valley, as real meanders.
-        float wavelength = 16f * 2f * baseHalf * MathF.Max(0.45f, 1f + 0.6f * Noise.Fbm1(_sAlong / 600f, s.Seed + 12)
-                                                                    + 0.25f * Noise.Fbm1(_sAlong / 170f, s.Seed + 16));
+        float wavelength = 16f * 2f * baseHalf * reach.Wavelength * MathF.Max(0.45f, 1f + 0.6f * Noise.Fbm1(_sAlong / 600f, s.Seed + 12)
+                                                                                  + 0.25f * Noise.Fbm1(_sAlong / 170f, s.Seed + 16));
         float skew = 0.06f * Noise.Fbm1(_sAlong / 800f, s.Seed + 14);
         _phase += MathF.PI * 2f * Centerline.Step / wavelength;
         float theta = amp * MathF.Sin(_phase) + amp * amp * amp * (0.02f * MathF.Cos(3f * _phase) - skew * MathF.Sin(3f * _phase));
         float restore = -1.1f * Math.Clamp(offset / 300f, -1f, 1f);
-        float rel = theta * MathF.Cos(restore) + restore + 0.25f * Noise.Fbm1(_sAlong / 400f, s.Seed + 13);
+        float rel = theta * MathF.Cos(restore) + restore + reach.Irregular * Noise.Fbm1(_sAlong / 400f, s.Seed + 13);
         float heading = VHeading[Math.Min(_vIdx, VHeading.Count - 1)] + rel;
+        // How sharply it turns (dθ/dφ of the meander curve): 1 at a tight bend's apex; + = heading increasing = turning
+        // left, where the inner bank (the point bar) is on the left.
+        float dTheta = amp * MathF.Cos(_phase) + amp * amp * amp * (-0.06f * MathF.Sin(3f * _phase) - 3f * skew * MathF.Cos(3f * _phase));
+        float turn = Math.Clamp(dTheta / 1.6f, -1f, 1f);
 
         double x = X[^1] + MathF.Sin(heading) * Centerline.Step, z = Z[^1] + MathF.Cos(heading) * Centerline.Step;
         _sAlong += Centerline.Step;
         var (sig, off, idx) = ProjectOnValley(x, z, _vIdx);
         _vIdx = idx;
         X.Add(x); Z.Add(z);
-        AddSample(sig, off, heading);
+        AddSample(sig, off, heading, turn);
     }
 
     // ================================================================ cuts

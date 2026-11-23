@@ -277,6 +277,14 @@ public static class ReachGenerator
             float a = MathF.Abs(inn);
             float bankH = MathUtil.Lerp(1.3f, inn > 0 ? 0.45f : 3.1f, a) * (1f + 0.3f * Noise.Fbm(wx / 60f, wz / 60f, s.Seed + 91, 2));
             float bankW = MathUtil.Lerp(7f, inn > 0 ? 34f : 3.5f, a);
+            if (s.ValleyAt != null)
+            {
+                // Bank character changes along the river (endless course only; the prototype stays as it was):
+                // stretches of high, steep cut banks (bare earth and rock show on the slopes) and of low, broad banks.
+                float high = MathUtil.Smoothstep(-0.3f, 0.35f, Noise.Fbm(wx / 420f, wz / 420f, s.Seed + 95, 2));
+                bankH *= MathUtil.Lerp(0.45f, 2.3f, high);
+                bankW *= MathUtil.Lerp(1.6f, 0.75f, high);
+            }
             float rise = bankH * MathF.Pow(MathUtil.Clamp01(dW / bankW), MathUtil.Lerp(1f, inn < 0 ? 0.55f : 1.25f, a));
             float flood = Valley.FloodplainRelief(wx, wz, s.Seed) * MathUtil.Smoothstep(4f, 60f, dW);
             float walls, baseLevel = f.Eta[i];

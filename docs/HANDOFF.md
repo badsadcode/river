@@ -34,7 +34,8 @@
    The eddy step adds one fine re-solve (~1.5 s on a desktop).
 3. **Endless streaming**: phases 0–3 done: the game streams the endless course around the raft ([STREAMING.md](STREAMING.md),
    D12–D15). Next: floating origin (phase 4: float precision past ~20 km), proper horizon/mist/saves (phase 5).
-4. **Rapids & a waterfall with portage**, island labyrinth segment type.
+4. **River variety**: tier 1 done (D16: reach types, breathing widths, bars, bank character). Next tiers: oxbows,
+   side channels, gorges, rapids & a waterfall with portage, snags, braided reaches, island labyrinth segment type.
 5. Water: wakes around the raft and the oar blade, splash particles at rocks, underwater view when swimming,
    rain rings (Thornwake has rain rings and wakes worth porting).
 6. Art: real trees (Thornwake VegetationPack), grass, reeds on slow inner banks, raft textures.

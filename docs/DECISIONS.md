@@ -137,7 +137,7 @@ own `Course` and `RiverWorld` (deterministic, so they match the main thread's) l
 (`user://cache/seg_<seed>_<k>.bin`) or generates it, bakes its seams and builds its whole node tree off the main
 thread (Godot allows building resources and nodes outside the tree there). The main thread attaches the nodes a few
 per frame within 2 ms, and drops what leaves the window.
-- **Seams**: segments overlap by 150 m. `Core/SegmentBake` writes `RiverWorld`'s blended values (±120 m of each cut)
+- **Seams**: segments overlap by 150 m (250 m since D16). `Core/SegmentBake` writes `RiverWorld`'s blended values (±120 m of each cut)
   into a copy of the field before its meshes and textures are built, so both neighbours show the same surface at the
   cut line; their shaders then discard everything across their cut lines (`clip_a`/`clip_b`, enabled once the
   neighbour is attached). A segment is only drawn when both neighbours' data exist, so its bake is final.
@@ -158,3 +158,20 @@ per frame within 2 ms, and drops what leaves the window.
   8 ms (worst 23 ms, about one every 7 min), memory flat (≈ 410–530 MB), the raft crosses seams without grounding.
 - Terrain LOD ranges overlap by 40 m: with touching ranges and hysteresis margins a freshly added chunk could show
   neither level (a hole to the sky).
+
+## D16 — River variety, tier 1 (reach types, widths, bars, banks)
+Tom: the banks were boring, the river too snake-shaped and too uniform in width. First tier, all in the course and the
+segment generator (deterministic, world-coordinate noise, so seams still match):
+- **Reach types** (`Course.ReachKind`): the course is cut into reaches of 2–6 km, each `Meander` (35 %), `Lazy`
+  (30 %, long wavelength, more irregular), `Straight` (15 %, small amplitude, narrower and deeper) or `Wide` (20 %,
+  1.6× width, shallow). Consecutive reaches differ; parameters blend over the first 500 m of a reach.
+- **Breathing width**: half-width varies with two noise octaves (160 m, 650 m), occasional pinches (narrower, deeper),
+  bends are wider and deeper at the apex and asymmetric (cut bank outside, inside shallower). Floor 6 m per side.
+- **Bars**: gravel point bars on the inside of strong bends (≥ 250 m apart, 60 % chance) and mid-channel bars in wide
+  reaches, as low islands in `CourseSegments.GravelBar`, kept clear of other islands.
+- **Bank character**: a 420 m world noise switches between low wide banks and high steep banks (course segments only;
+  the prototype reach and its fingerprint are unchanged).
+- **Overlap 150 → 250 m**: the variable widths made the raw current at the inlet differ more between neighbours
+  (15 cm/s); a longer overlap lets the inlet settle (12 cm/s raw; blended values remain continuous). The test limit is
+  15 cm/s raw.
+Next tiers (not done): oxbows, side channels, gorges, rapids, snags, braided reaches, island labyrinths.

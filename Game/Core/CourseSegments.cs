@@ -16,7 +16,10 @@ namespace River.Core;
 /// </summary>
 public static class CourseSegments
 {
-    public const float Overlap = 150f;      // m beyond each cut, shared with the neighbour
+    // m beyond each cut, shared with the neighbour. 250 m (≈ 7 channel widths): water enters a grid perpendicular to
+    // its edge, up to ~20° off the river's own direction, and needs that distance to settle before the cut (at 150 m
+    // the neighbours' currents still differed by up to 8° near the banks).
+    public const float Overlap = 250f;
     public const float Corridor = 650f;     // m either side of the valley axis on the grid
     public const float SizeStep = 32f;      // grid sizes round up to this (odd node counts coarsen several times)
 
@@ -174,25 +177,65 @@ public static class CourseSegments
         }
     }
 
-    /// <summary>A low gravel bar on the inside of the sharpest bend in the segment's interior (away from cuts and features).</summary>
+    /// <summary>
+    /// Gravel and sand bars in the segment's interior (away from cuts and features):
+    ///   • point bars: on the inside of sharp bends (local peaks of turning, ≥ 250 m apart), 60 % of them, sized to
+    ///     the river, low (they're what's left of the inner bank at the apex);
+    ///   • mid-channel bars: in wide reaches, every ~300 m half the time, low and long, a little off centre.
+    /// </summary>
     static void GravelBar(Course c, int k, SegmentSpec spec,
                           Func<double, double, (float, float)> L, Func<double, double, (float, float)> LDir)
     {
         int a = c.RiverIndexAt(c.Cuts[k] + 400.0), b = c.RiverIndexAt(c.Cuts[k + 1] - 400.0);
-        int best = -1; float bestBend = 0f, bestSign = 0f;
-        for (int i = a + 6; i < b - 6; i++)
+        bool NearFeature(int i)
         {
-            bool nearFeature = false;
-            foreach (var f in c.Features) if (c.Sigma[i] > f.S0 - 100.0 && c.Sigma[i] < f.S1 + 100.0) { nearFeature = true; break; }
-            if (nearFeature) continue;
-            float d = c.Heading[i + 6] - c.Heading[i - 6];     // turning over ±12 m
-            if (MathF.Abs(d) > bestBend) { bestBend = MathF.Abs(d); best = i; bestSign = MathF.Sign(d); }
+            foreach (var f in c.Features) if (c.Sigma[i] > f.S0 - 100.0 && c.Sigma[i] < f.S1 + 100.0) return true;
+            return false;
         }
-        if (best < 0 || bestBend < 0.25f) return;
-        // Heading increasing = turning towards the river's left (Centerline right = (−cos h, sin h)): inner bank on the left.
-        float side = bestSign > 0 ? -1f : 1f;
-        float hw = side > 0 ? c.HalfRight[best] : c.HalfLeft[best];
-        spec.Islands.Add(MakeIsland(c, best, side * hw * 0.55f, 18f, 34f, 5.5f, 0.45f, 0.25f, c.Settings.Seed + 9000 + k, L, LDir));
+        bool Clear(Island isl, float margin)
+        {
+            foreach (var o in spec.Islands) if (o.Sdf(isl.X, isl.Z) < isl.HalfWidth + margin) return false;
+            return true;
+        }
+        float Turn(int i) => c.Heading[i + 6] - c.Heading[i - 6];     // turning over ±12 m
+        int n = 0;
+        double lastBar = double.MinValue;
+        for (int i = a + 7; i < b - 7; i++)
+        {
+            float d = Turn(i);
+            // A local peak of turning, sharp enough.
+            if (MathF.Abs(d) < 0.25f || MathF.Abs(d) < MathF.Abs(Turn(i - 1)) || MathF.Abs(d) < MathF.Abs(Turn(i + 1))) continue;
+            if (c.Sigma[i] - lastBar < 250.0 || NearFeature(i)) continue;
+            lastBar = c.Sigma[i];
+            float h = Noise.Hash01(i, 1, c.Settings.Seed + 9100);
+            if (h > 0.6f) continue;
+            // Heading increasing = turning towards the river's left (Centerline right = (−cos h, sin h)): inner bank on the left.
+            float side = d > 0 ? -1f : 1f;
+            float hw = side > 0 ? c.HalfRight[i] : c.HalfLeft[i];
+            float half = Math.Clamp(0.3f * hw, 4f, 12f);
+            var bar = MakeIsland(c, i, side * hw * 0.6f, half * 3f, half * 6f, half, 0.35f + 0.25f * Noise.Hash01(i, 2, c.Settings.Seed + 9100),
+                                 0.3f, c.Settings.Seed + 9000 + k * 64 + n, L, LDir);
+            if (!Clear(bar, 10f)) continue;
+            spec.Islands.Add(bar);
+            n++;
+        }
+        // Mid-channel bars in wide reaches.
+        double next = c.Sigma[a];
+        for (int i = a; i < b; i++)
+        {
+            if (c.Sigma[i] < next) continue;
+            next = c.Sigma[i] + 300.0;
+            if (c.ReachAt(c.Sigma[i]).Width < 1.35f || NearFeature(i)) continue;
+            float h1 = Noise.Hash01(i, 3, c.Settings.Seed + 9200), h2 = Noise.Hash01(i, 4, c.Settings.Seed + 9200);
+            if (h1 > 0.5f) continue;
+            float hw = MathF.Min(c.HalfLeft[i], c.HalfRight[i]);
+            float half = Math.Clamp(0.3f * hw, 4f, 10f);
+            float lateral = (h2 - 0.5f) * 0.5f * hw;
+            var bar = MakeIsland(c, i, lateral, half * 2.5f, half * 5f, half, 0.3f + 0.4f * h2, 0.35f, c.Settings.Seed + 9500 + k * 64 + n, L, LDir);
+            if (!Clear(bar, 12f)) continue;
+            spec.Islands.Add(bar);
+            n++;
+        }
     }
 
     /// <summary>
