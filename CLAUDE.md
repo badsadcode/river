@@ -13,13 +13,16 @@ Studio motto #001: *code shall remain understandable to whichever AI inherits th
   Pause and ask Tom before significant artistic decisions (looks, palettes, tone).
 * Commit small, push often. No pull requests unless Tom asks. Never rewrite pushed history.
 * Keep the headless generator tests passing:
-  `dotnet run --project Tests/Core.Tests -c Release` (add `-- --map out.png` for a top-down map, `--flow out.png` for the current and eddies).
+  `dotnet run --project Tests/Core.Tests -c Release` (add `-- --map out.png` for a top-down map, `--flow out.png` for the current and eddies,
+  `--course out.png` for a 50 km map of the endless course).
 * Shaders: Godot does not allow `return` in `fragment()`. After shader changes, run a capture and grep the log for
   `SHADER ERROR`.
 
 ## Layout
-* `Game/Core/` — pure C# (no Godot types): noise, centre lines, islands, the reach generator, the flow solver,
-  the field container and its cache. Testable headlessly.
+* `Game/Core/` — pure C# (no Godot types): noise, centre lines, islands, the endless `Course` (1D journey),
+  `SegmentSpec`/`Frame` (one segment's slice), the segment generator (`ReachGenerator`), the flow solver, eddies,
+  surface waves, the field container and its cache. `PrototypeCourse` is the hand-made reach the game still uses.
+  Testable headlessly. Streaming plan: `docs/STREAMING.md`.
 * `Game/World/` — Godot side of the world: field → GPU textures, terrain, water meshes, vegetation, environment.
 * `Game/Shaders/` — `River.gdshader` (the water), `Terrain.gdshader`, `Mist.gdshader` (fog volume), `Tree.gdshader`.
 * `Game/Raft/` — raft physics (`Raft.cs`) and its placeholder model and deck colliders (`RaftModel.cs`).

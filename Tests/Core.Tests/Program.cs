@@ -4,11 +4,12 @@ using System.IO.Compression;
 using River.Core;
 
 // Headless checks of the river generator. Exit code 0 = all pass.
-string mapPath = null, flowPath = null;
+string mapPath = null, flowPath = null, coursePath = null;
 for (int a = 0; a < args.Length; a++)
 {
     if (args[a] == "--map" && a + 1 < args.Length) mapPath = args[++a];
     else if (args[a] == "--flow" && a + 1 < args.Length) flowPath = args[++a];
+    else if (args[a] == "--course" && a + 1 < args.Length) coursePath = args[++a];
 }
 
 int failures = 0;
@@ -82,6 +83,87 @@ Console.WriteLine("Frames:");
     Check(MathF.Abs(lx - 310.25f) < 1e-3f && MathF.Abs(lz - 1820.5f) < 1e-3f, $"grid → world → grid round-trips far from the origin ({lx:F4}, {lz:F4})");
     var (ax, az) = fr.ToWorld(0f, 1f);
     Check(Math.Abs(ax - fr.OriginX - MathF.Sin(0.7f)) < 1e-5 && Math.Abs(az - fr.OriginZ - MathF.Cos(0.7f)) < 1e-5, "the grid's +z points along the heading");
+}
+
+// ---------------------------------------------------------------- the endless course (fast, 50 km)
+Console.WriteLine("Course:");
+{
+    var cs = new CourseSettings();
+    var course = new Course(cs);
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    course.ExtendTo(50000.0);
+    long ms = sw.ElapsedMilliseconds;
+    float bearing = cs.BearingDeg * MathF.PI / 180f;
+
+    // Valley: never more than MaxSwing off the bearing, always progressing along it, turning gently.
+    float maxOff = 0f, minHead = 9f, maxHead = -9f, tightest = float.MaxValue, tightestNormal = float.MaxValue;
+    bool progresses = true;
+    double bx = MathF.Sin(bearing), bz = MathF.Cos(bearing);
+    for (int i = 1; i < course.VHeading.Count; i++)
+    {
+        float h = course.VHeading[i];
+        maxOff = MathF.Max(maxOff, MathF.Abs(h - bearing)); minHead = MathF.Min(minHead, h); maxHead = MathF.Max(maxHead, h);
+        double prog = (course.VX[i] - course.VX[i - 1]) * bx + (course.VZ[i] - course.VZ[i - 1]) * bz;
+        if (prog < -1e-9) progresses = false;
+        float dh = MathF.Abs(h - course.VHeading[i - 1]);
+        if (dh < 1e-7f) continue;
+        float r = Course.ValleyStep / dh;
+        tightest = MathF.Min(tightest, r);
+        double sig = i * Course.ValleyStep;
+        bool nearConfluence = false;
+        foreach (var f in course.Features) if (f.Kind == FeatureKind.Confluence && sig - f.Mid > -10 && sig - f.Mid < 1500) nearConfluence = true;
+        if (!nearConfluence) tightestNormal = MathF.Min(tightestNormal, r);
+    }
+    // River: level only goes down; meander belt stays near the valley axis; discharge grows.
+    bool etaDown = true; float maxOffset = 0f;
+    for (int i = 1; i < course.Count; i++)
+    {
+        if (course.Eta[i] > course.Eta[i - 1] + 1e-6f) etaDown = false;
+        maxOffset = MathF.Max(maxOffset, MathF.Abs(course.Offset[i]));
+    }
+    // Cuts: segment lengths, clear of features, crossed once.
+    bool cutsOk = true, lengthsOk = true; int cutsChecked = 0;
+    for (int k = 1; k < course.Cuts.Count && course.Cuts[k] < 48000.0; k++)
+    {
+        double len = course.Cuts[k] - course.Cuts[k - 1];
+        if (len < cs.MinSegment - 1 || len > cs.MaxSegment + 1) lengthsOk = false;
+        foreach (var f in course.Features)
+            if (course.Cuts[k] > f.S0 - cs.CutClearance && course.Cuts[k] < f.S1 + cs.CutClearance) cutsOk = false;
+        if (!course.CrossesOnce(course.Cuts[k], cs.CutWindow)) cutsOk = false;
+        cutsChecked++;
+    }
+    var counts = new int[4];
+    foreach (var f in course.Features) if (f.S1 < 50000.0) counts[(int)f.Kind]++;
+    int end = course.Count - 1; while (end > 0 && course.Sigma[end] > 50000.0) end--;
+    double riverKm = end * Centerline.Step / 1000.0;
+    Console.WriteLine($"  {riverKm:F1} km of river over 50 km of valley (sinuosity {riverKm / 50.0:F2}) in {ms} ms; " +
+                      $"{counts[0]} lakes, {counts[1]} splits, {counts[2]} riffles, {counts[3]} confluences, {cutsChecked} cuts");
+    Console.WriteLine($"  valley heading {minHead * 180 / MathF.PI:F0}°…{maxHead * 180 / MathF.PI:F0}° (0 = south, + = east); " +
+                      $"tightest turn {tightestNormal:F0} m ({tightest:F0} m below confluences); " +
+                      $"level {course.Eta[0]:F1} → {course.Eta[end]:F1} m; discharge {course.Discharge[0]:F0} → {course.Discharge[end]:F0} m³/s");
+    Check(maxOff <= cs.MaxSwingDeg * MathF.PI / 180f + 1e-4f && progresses, "the valley stays within ±90° of south and never heads back");
+    Check(tightestNormal >= cs.MinTurnRadius * 0.99f && tightest >= cs.ConfluenceTurnRadius * 0.99f, "valley turns are sweeping (radius ≥ 3 km, ≥ 1.5 km below confluences)");
+    Check(maxHead - minHead > 40f * MathF.PI / 180f, "the course really changes direction over 50 km");
+    Check(etaDown, "the water level only goes down");
+    Check(maxOffset < 450f, $"the meander belt stays within the corridor (max {maxOffset:F0} m from the valley axis)");
+    Check(lengthsOk && cutsOk && cutsChecked >= 12, "segments are 1.5–4 km, cut in plain stretches the river crosses once");
+    Check(counts[0] + counts[1] + counts[2] + counts[3] >= 8, "features along the way");
+
+    // Determinism: built in uneven steps, the same course.
+    var stepped = new Course(cs);
+    foreach (double to in new[] { 3000.0, 3100.0, 11000.0, 27000.0, 50000.0 }) stepped.ExtendTo(to);
+    bool sameCourse = stepped.Count >= end && stepped.Cuts.Count >= cutsChecked;
+    for (int i = 0; i <= end && sameCourse; i++) sameCourse = stepped.X[i] == course.X[i] && stepped.Z[i] == course.Z[i] && stepped.Eta[i] == course.Eta[i];
+    for (int k = 0; k < cutsChecked && sameCourse; k++) sameCourse = stepped.Cuts[k] == course.Cuts[k];
+    Check(sameCourse, "built in steps or at once, the course is identical");
+
+    if (coursePath != null)
+    {
+        CourseMap.Write(course, 0.0, 50000.0, 20.0, coursePath);
+        string zoom = System.IO.Path.ChangeExtension(coursePath, null) + "_zoom.png";
+        CourseMap.Write(course, 0.0, 8000.0, 5.0, zoom);
+        Console.WriteLine($"  course maps: {coursePath}, {zoom}");
+    }
 }
 
 if (Array.IndexOf(args, "--sandbox-only") >= 0) { Console.WriteLine(failures == 0 ? "ALL PASS" : $"{failures} FAILED"); return failures == 0 ? 0 : 1; }
@@ -260,7 +342,7 @@ static class MapRender
         WritePng(path, w, h, px);
     }
 
-    static void WritePng(string path, int w, int h, byte[] rgb)
+    public static void WritePng(string path, int w, int h, byte[] rgb)
     {
         using var fs = File.Create(path);
         fs.Write(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
@@ -333,5 +415,87 @@ static class Fingerprint
         foreach (var r in f.Rocks) { F(r.X); F(r.Z); F(r.Radius); F(r.Top); F(r.FlowX); F(r.FlowZ); }
         F(f.EtaTrendA); F(f.EtaTrendB); F(f.OutflowMeasured);
         return h;
+    }
+}
+
+static class CourseMap
+{
+    /// <summary>
+    /// Top-down map of the course between valley distances σ0 and σ1 (north up, east right): the corridor, the river
+    /// (blue; lakes light blue, riffles white, island splits green), the valley axis, confluences (magenta) and the
+    /// segment cuts (red, across the valley).
+    /// </summary>
+    public static void Write(Course c, double s0, double s1, double mpp, string path)
+    {
+        double x0 = double.MaxValue, x1 = double.MinValue, z0 = double.MaxValue, z1 = double.MinValue;
+        for (int i = 0; i < c.VX.Count; i++)
+        {
+            double sg = i * Course.ValleyStep;
+            if (sg < s0 || sg > s1) continue;
+            x0 = Math.Min(x0, c.VX[i]); x1 = Math.Max(x1, c.VX[i]); z0 = Math.Min(z0, c.VZ[i]); z1 = Math.Max(z1, c.VZ[i]);
+        }
+        x0 -= 900; x1 += 900; z0 -= 900; z1 += 900;
+        int w = (int)((x1 - x0) / mpp), h = (int)((z1 - z0) / mpp);
+        var px = new byte[w * h * 3];
+        void Put(int x, int y, byte r, byte g, byte b) { if (x < 0 || y < 0 || x >= w || y >= h) return; int k = (y * w + x) * 3; px[k] = r; px[k + 1] = g; px[k + 2] = b; }
+        void Disc(double wx, double wz, double rad, byte r, byte g, byte b)
+        {
+            double cx = (wx - x0) / mpp, cy = (wz - z0) / mpp, rr = Math.Max(0.7, rad / mpp);
+            for (int y = (int)(cy - rr); y <= (int)(cy + rr) + 1; y++)
+                for (int x = (int)(cx - rr); x <= (int)(cx + rr) + 1; x++)
+                    if ((x - cx) * (x - cx) + (y - cy) * (y - cy) <= rr * rr) Put(x, y, r, g, b);
+        }
+        for (int i = 0; i < w * h; i++) { px[i * 3] = 70; px[i * 3 + 1] = 92; px[i * 3 + 2] = 58; }
+        // Corridor (±600 m around the valley axis).
+        for (int i = 0; i < c.VX.Count; i += 4)
+        {
+            double sg = i * Course.ValleyStep;
+            if (sg >= s0 && sg <= s1) Disc(c.VX[i], c.VZ[i], 600, 96, 124, 74);
+        }
+        // River, coloured by feature.
+        for (int i = 0; i < c.Count; i++)
+        {
+            double sg = c.Sigma[i];
+            if (sg < s0 || sg > s1) continue;
+            byte r = 40, g = 90, b = 200;
+            foreach (var f in c.Features)
+            {
+                if (sg < f.S0 || sg > f.S1) continue;
+                if (f.Kind == FeatureKind.Lake) { r = 110; g = 170; b = 235; }
+                else if (f.Kind == FeatureKind.Riffle) { r = 235; g = 240; b = 245; }
+                else if (f.Kind == FeatureKind.Split) { r = 60; g = 170; b = 90; }
+            }
+            // Draw the channel across its width (left and right banks differ in lakes).
+            float h0 = c.Heading[i];
+            double rx = Math.Cos(h0), rz = -Math.Sin(h0);
+            for (double t = -c.HalfLeft[i]; t <= c.HalfRight[i]; t += Math.Max(mpp * 0.7, 1.0))
+                Disc(c.X[i] + rx * t, c.Z[i] + rz * t, mpp * 0.6, r, g, b);
+        }
+        // Valley axis.
+        for (int i = 0; i < c.VX.Count; i += 3)
+        {
+            double sg = i * Course.ValleyStep;
+            if (sg >= s0 && sg <= s1) Disc(c.VX[i], c.VZ[i], mpp * 0.5, 30, 40, 30);
+        }
+        // Confluences: a stub coming in from the tributary's side.
+        foreach (var f in c.Features)
+        {
+            if (f.Kind != FeatureKind.Confluence || f.Mid < s0 || f.Mid > s1) continue;
+            int vi = (int)(f.Mid / Course.ValleyStep);
+            float hv = c.VHeading[vi];
+            double rx = Math.Cos(hv) * f.Side, rz = -Math.Sin(hv) * f.Side;
+            for (double t = 0; t < 600; t += mpp * 0.7) Disc(c.VX[vi] + rx * t - Math.Sin(hv) * t * 0.5, c.VZ[vi] + rz * t - Math.Cos(hv) * t * 0.5, mpp, 200, 60, 200);
+        }
+        // Cuts across the valley.
+        foreach (double cut in c.Cuts)
+        {
+            if (cut < s0 || cut > s1) continue;
+            int vi = (int)(cut / Course.ValleyStep);
+            if (vi >= c.VX.Count) continue;
+            float hv = c.VHeading[vi];
+            double rx = Math.Cos(hv), rz = -Math.Sin(hv);
+            for (double t = -600; t <= 600; t += mpp * 0.7) Disc(c.VX[vi] + rx * t, c.VZ[vi] + rz * t, mpp * 0.5, 220, 40, 40);
+        }
+        MapRender.WritePng(path, w, h, px);
     }
 }

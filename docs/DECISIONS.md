@@ -90,3 +90,20 @@ as a pure function of its spec: the course slice in the segment's own **Frame** 
 heading), its inflows (edge, channel, discharge) and the water level held at its outlet. The prototype layout now
 lives in `PrototypeCourse`; the valley shape functions in `Valley`. Refactor verified bit-for-bit: the headless
 tests print a fingerprint of the whole field (`EBCEAE30D3E8F142` on .NET 9/Windows before and after).
+
+## D13 — The endless course (streaming phase 1)
+`Game/Core/Course.cs` generates the journey in 1D, incrementally and deterministically (built in steps or at once,
+identical). **Valley axis** every 10 m: heading = bearing (south) + up to ±75° of slow noise (40 km wavelength),
+clamped to ±90° (so it always progresses south and can't run into itself), turning radius ≥ 3 km, ≥ 1.5 km for
+1.5 km below a confluence, where it also swings away from the tributary (Tom's D1–D3). **Features** (lake, island
+split, riffle, confluence) are scheduled along σ (distance along the valley) with per-10-km frequencies and ≥ 600 m
+gaps. **Cuts** are scheduled with them (target 2.5 km, 1.5–4 km, ≥ 250 m from any feature), and the river runs
+straighter within ~350 m of each cut, so it crosses every cut line once, in a plain channel, by construction
+(searching for naturally straight stretches failed: at sinuosity 1.9 there often was none). **River** every 2 m:
+Kinoshita meanders relative to the local valley heading, with wider amplitude/wavelength variation than the
+prototype (a whole journey of identical loops reads as a spring) and wavelength ≈ 16 widths along the river.
+Width ∝ Q^0.5, depth ∝ Q^0.35 (capped); discharge grows slowly (creeks) and at confluences (+2–15 %, mostly small),
+capped at 1,200 m³/s for the 1.2 km corridor. **Water level** from Manning over each cross-section, so the course
+agrees with the segment flow solve (≈ 1.4 m/km here, as the prototype's solve). Known limit: with widths capped, a
+big river stays steep (≈ 3 km of drop per 500 km of valley); fine in float, revisit if the corridor widens.
+Checks in `Tests/Core.Tests` (50 km); 500 km × 3 seeds verified once (≈ 590 cuts, all valid). Map: `-- --course out.png`.
