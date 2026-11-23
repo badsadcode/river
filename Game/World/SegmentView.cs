@@ -75,7 +75,13 @@ public sealed class SegmentView
     }
 
     /// <summary>Place the root in the scene for the current floating origin (main thread: on attach and after shifts).</summary>
-    public void Place() => Root.Position = Origin.ToScene(Field.Frame.OriginX, 0f, Field.Frame.OriginZ);
+    public void Place()
+    {
+        Root.Position = Origin.ToScene(Field.Frame.OriginX, 0f, Field.Frame.OriginZ);
+        if (Mist?.Material is ShaderMaterial m) m.SetShaderParameter(MistOrigin, new Vector3((float)Origin.X, 0f, (float)Origin.Z));
+    }
+
+    static readonly StringName MistOrigin = new("world_origin");
 
     /// <summary>Cut-line clipping on this segment's materials (only once the neighbour on that side is drawn).</summary>
     public void SetClips(RiverWorld world, bool upstreamNeighbour, bool downstreamNeighbour)

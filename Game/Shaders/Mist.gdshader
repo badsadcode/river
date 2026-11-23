@@ -2,8 +2,9 @@
 // Used by a FogVolume covering the reach (EnvironmentRig.cs); strength comes from the time-of-day preset.
 shader_type fog;
 
-// Floating origin (World/Origin.cs): scene position + world_origin = world position.
-global uniform vec3 world_origin;
+// Floating origin (World/Origin.cs): scene position + world_origin = world position. Set per material by
+// SegmentView.Place (global uniforms didn't reach fog shaders: the mist sampled the wrong place and filled the view).
+uniform vec3 world_origin = vec3(0.0);
 
 uniform sampler2D shape_tex : filter_linear, repeat_disable;  // eta, shore distance, terrain height
 uniform vec2 field_size = vec2(601.0, 1601.0);

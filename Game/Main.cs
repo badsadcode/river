@@ -335,8 +335,10 @@ public partial class Main : Node3D
                 break;
             case "water_close":
             {
-                var from = OnWater(raft.X + right.X * 9f, raft.Z + right.Z * 9f, 1.2f);
-                FlyCam.LookAtPoint(from, OnWater(raft.X + fwd.X * 14f - right.X * 4f, raft.Z + fwd.Z * 14f - right.Z * 4f, 0f));
+                // (raft is a scene position; OnWater takes world coordinates)
+                var (rwx, rwz) = Origin.ToWorld(raft);
+                var from = OnWater(rwx + right.X * 9f, rwz + right.Z * 9f, 1.2f);
+                FlyCam.LookAtPoint(from, OnWater(rwx + fwd.X * 14f - right.X * 4f, rwz + fwd.Z * 14f - right.Z * 4f, 0f));
                 break;
             }
             case "lake":
@@ -380,6 +382,11 @@ public partial class Main : Node3D
                                    OnWater(best.X + dx * 0.8f, best.Z + dz * 0.8f, 0f));
                 break;
             }
+            case "shift":
+                // Floating-origin check: move the origin 360 m without moving the view (the camera is shifted with
+                // the world); the capture should match the one before.
+                Origin.Shift(raft + new Vector3(300f, 0f, 200f));
+                break;
             case "willow":
             case "willow_far":
             {

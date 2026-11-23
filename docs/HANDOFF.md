@@ -33,8 +33,8 @@
    (first such reach), `side_channel`, `oxbow`, `snag` (first segment with one).
 2. **Generation time**: multilevel solve brought it down ~35 % (D9); multigrid-preconditioned CG would cut it further.
    The eddy step adds one fine re-solve (~1.5 s on a desktop).
-3. **Endless streaming**: phases 0–3 done: the game streams the endless course around the raft ([STREAMING.md](STREAMING.md),
-   D12–D15). Next: floating origin (phase 4: float precision past ~20 km), proper horizon/mist/saves (phase 5).
+3. **Endless streaming**: phases 0–4 done: the game streams the endless course around the raft, with a floating origin (D20) ([STREAMING.md](STREAMING.md),
+   D12–D15, D20). Next: proper horizon/mist/saves (phase 5).
 4. **River variety**: tiers 1–2 done (D16: reach types, breathing widths, bars, bank character; D17: gorges, braided
    reaches, side channels, oxbow lakes, snags; D19: rapids). Next: a waterfall with portage, island labyrinths, reeds.
 5. Water: wakes around the raft and the oar blade, splash particles at rocks, underwater view when swimming,

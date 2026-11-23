@@ -234,3 +234,20 @@ Still to do (tier 3): rapids and a waterfall with portage, island labyrinths, re
 - Seam test: terrain allowance now uses the slope along the valley too (a cut across a steep wall failed it).
 - **Weeping willow** (Tom's pack): the fifth species, within 12 m of rivers and oxbows (60 % of broadleaves there).
 - `docs/.gdignore`: Godot no longer imports the docs' images.
+
+## D20 — Floating origin (streaming phase 4)
+- `World/Origin.cs`: scene = world − (X, Z), whole metres; Y not shifted. It starts at the raft's start; when the raft
+  is more than 1024 m from the scene origin, `Main._PhysicsProcess` shifts it there (before the raft integrates).
+  Subscribers to `Origin.Shifted` move what lives in scene space: the raft and fly camera (Main), the player when not on
+  the raft and the chase camera (PlayerController), segment roots (`SegmentView.Place`), tree LOD (rebuilds).
+- World data stays double: the course, segment frames, `RiverWorld` (all queries take world coordinates). Godot code
+  converts at the boundary (`Origin.ToWorld/ToScene`; raft, player, HUD, streamer focus, shots, drift test).
+  `TreeSet` keeps its trees relative to the segment's frame origin, in double.
+- **Patterns**: simpler than the plan's per-term phase offsets. Shaders add a global `world_origin` (whole metres, exact
+  in float) to their scene positions, so ripples, foam, waves, caustics, gusts and clipping see the same float world
+  coordinates as before a shift, and `SurfaceWaves` (raft) computes in the same float world coordinates. Pattern
+  precision is that of float world coordinates (~4 mm at 50 km, ~6 cm at 1000 km), fine for patterns; geometry and
+  physics stay near the origin. Fog shaders don't receive global uniforms: the mist gets `world_origin` per material.
+- Checks: drift test with a forced shift every 30 s — water height at a fixed world point jumps 0.00 mm, the raft
+  drifts on smoothly (8 min in the first gorge, 28 km out); a capture before and after a 360 m shift matches.
+  Pseudo-shot `shift` for that comparison.

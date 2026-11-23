@@ -25,7 +25,8 @@ Studio motto #001: *code shall remain understandable to whichever AI inherits th
   `SegmentBake` (seam blend baked into a segment before drawing), the segment generator (`ReachGenerator`), the flow solver, eddies,
   surface waves, the field container and its cache. `PrototypeCourse` is the hand-made reach (headless tests only).
   Testable headlessly. Streaming plan: `docs/STREAMING.md`.
-* `Game/World/` — Godot side of the world: `WorldStreamer` (segments around the raft, worker thread, cache),
+* `Game/World/` — Godot side of the world: `Origin` (floating origin: scene = world − origin; RiverWorld queries take
+  world coordinates), `WorldStreamer` (segments around the raft, worker thread, cache),
   `SegmentView` (one segment's nodes), field → GPU textures, terrain, water meshes, vegetation, environment.
 * `Game/Shaders/` — `River.gdshader` (the water), `Terrain.gdshader`, `Mist.gdshader` (fog volume), `Tree.gdshader`.
 * `Game/Raft/` — raft physics (`Raft.cs`) and its placeholder model and deck colliders (`RaftModel.cs`).
