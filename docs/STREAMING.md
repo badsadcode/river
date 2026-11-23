@@ -1,6 +1,6 @@
 # Endless streaming — plan
 
-*Draft 2026-11-23, Sage. Status: proposed, waiting for Tom's decisions in §9.*
+*2026-11-23, Sage. Status: accepted; Tom's decisions in §9 (all four as recommended). Next: phase 0.*
 
 Today the world is one fixed 1.2 × 3.2 km reach laid along +z. This plan turns it into a river that never ends
 and can change direction, generated ahead of the raft and dropped behind it, with the water, terrain, raft
@@ -173,7 +173,11 @@ series of commits; the game stays playable throughout (phase 0 and 1 don't chang
 
 ---
 
-## 9. Decisions for Tom
+## 9. Decisions (Tom, 2026-11-23)
+
+**Decided:** D1 a general bearing with swings up to ±90°, never back the way it came · D2 bearing south ·
+D3 sweeping turns every 10–30 km, sharper now and then at confluences and gorges · D4 one segment kept behind the
+raft, older ones from the disk cache.
 
 | | Question | Options | Sage's recommendation |
 |---|---|---|---|
