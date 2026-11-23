@@ -14,13 +14,21 @@ namespace River.World;
 public static class Vegetation
 {
     const float Block = 256f;
+    const float BoardBlock = 512f;   // billboard MultiMeshes: one per variant per block (20 variants → keep blocks big)
 
     /// <summary>
     /// Vegetation and rocks in the field's grid coordinates. <paramref name="owns"/> (grid x, z → bool), if given,
     /// keeps only what this segment owns (neighbours overlap; each plants its own side of the cuts).
     /// </summary>
-    public static Node3D Build(ReachField f, Func<float, float, bool> owns = null)
+    /// <param name="trees">If given and the tree packs are loaded (TreeLibrary): real trees go here (grid-local
+    /// transform, variant id) for TreeLod to draw near the camera, and only their billboards are built here.
+    /// Otherwise (or for bushes) the placeholder meshes.</param>
+    public static Node3D Build(ReachField f, Func<float, float, bool> owns = null, List<(Transform3D, ushort)> trees = null)
     {
+        bool real = trees != null && TreeLibrary.Loaded;
+        int birch = TreeLibrary.IndexOf(TreeLibrary.Kind.Birch), oak = TreeLibrary.IndexOf(TreeLibrary.Kind.Oak);
+        int pine = TreeLibrary.IndexOf(TreeLibrary.Kind.Pine), spruce = TreeLibrary.IndexOf(TreeLibrary.Kind.Spruce);
+        var boards = new Dictionary<(int, int, int), List<Transform3D>>();
         var root = new Node3D { Name = "Vegetation" };
         var mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://Game/Shaders/Tree.gdshader") };
         var conifer = ConiferMesh(); var broadleaf = BroadleafMesh(); var bush = BushMesh();
@@ -71,8 +79,45 @@ public static class Vegetation
                 var t = new Transform3D(basis, new Vector3(px, hgt - 0.15f, pz));
                 float tv = rng.Range(0.82f, 1.12f);
                 var tint = new Color(tv * rng.Range(0.95f, 1.05f), tv, tv * rng.Range(0.9f, 1.05f));
+                if (real && kind != 2)
+                {
+                    // Species by habitat: spruce on the valley walls and in cool patches, pine on drier ground;
+                    // birch along the water and at wood edges (standing in for alder and willow until there are
+                    // packs for them), oak in the open floodplain.
+                    int sp = kind == 0
+                        ? (wall > 0.35f || Noise.Fbm(px / 500f, pz / 500f, f.Seed + 5103, 2) > 0.05f ? spruce : pine)
+                        : (riparian > 0.25f || Noise.Fbm(px / 350f, pz / 350f, f.Seed + 5104, 2) > 0.2f ? birch : oak);
+                    if (sp < 0) sp = kind == 0 ? Math.Max(spruce, pine) : Math.Max(birch, oak);
+                    if (sp >= 0)
+                    {
+                        var vars = TreeLibrary.Species[sp].Variants;
+                        var tvar = vars[Math.Min(vars.Count - 1, (int)(rng.Next01() * vars.Count))];
+                        // The packs are full-size trees (11–18 m): vary them less than the placeholders.
+                        float s2 = rng.Range(0.8f, 1.12f);
+                        var tb = new Basis(Vector3.Up, rng.Range(0f, MathF.Tau)).Scaled(new Vector3(s2, s2 * rng.Range(0.93f, 1.07f), s2));
+                        var tt = new Transform3D(tb, new Vector3(px, hgt - 0.1f, pz));
+                        trees.Add((tt, (ushort)tvar.Id));
+                        var bk = ((int)(px / BoardBlock), (int)(pz / BoardBlock), tvar.Id);
+                        if (!boards.TryGetValue(bk, out var bl)) boards[bk] = bl = new List<Transform3D>();
+                        bl.Add(tt);
+                        continue;
+                    }
+                }
                 Add(kind, t, tint);
             }
+
+        foreach (var (key, list) in boards)
+        {
+            var tvar = TreeLibrary.All[key.Item3];
+            var mm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, Mesh = tvar.Lods[3], InstanceCount = list.Count };
+            for (int i = 0; i < list.Count; i++) mm.SetInstanceTransform(i, list[i]);
+            root.AddChild(new MultiMeshInstance3D
+            {
+                Name = $"B{key.Item1}_{key.Item2}_{key.Item3}", Multimesh = mm,
+                VisibilityRangeEnd = 1900f, VisibilityRangeEndMargin = 60f,
+                VisibilityRangeFadeMode = GeometryInstance3D.VisibilityRangeFadeModeEnum.Self,
+            });
+        }
 
         var meshes = new Mesh[] { conifer, broadleaf, bush };
         foreach (var (key, list) in buckets)

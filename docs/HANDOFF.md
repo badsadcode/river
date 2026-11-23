@@ -39,7 +39,8 @@
    reaches, side channels, oxbow lakes, snags). Next: rapids & a waterfall with portage, island labyrinths, reeds.
 5. Water: wakes around the raft and the oar blade, splash particles at rocks, underwater view when swimming,
    rain rings (Thornwake has rain rings and wakes worth porting).
-6. Art: real trees (Thornwake VegetationPack), grass, reeds on slow inner banks, raft textures.
+6. Art: real trees done (D18: NoorForm birch/oak/pine/spruce); next: alder/willow packs for the banks, real
+   bushes, grass, reeds on slow inner banks and oxbows, raft textures.
 7. Fishing (Thornwake has a fishing system to adapt).
 
 ## How to see it

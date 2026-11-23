@@ -137,7 +137,12 @@ public partial class Main : Node3D
         AddChild(new Hud { Name = "Hud" });
         _status.Visible = false;
 
-        if (_args.ContainsKey("drift-test")) { Streamer.StartWorker(); _ = DriftTest(float.Parse(_args["drift-test"], CultureInfo.InvariantCulture)); return; }
+        if (_args.ContainsKey("drift-test"))
+        {
+            // In a window (performance runs) look from the deck; headless there is nothing to look at.
+            if (DisplayServer.GetName() != "headless") Player.Activate();
+            Streamer.StartWorker(); _ = DriftTest(float.Parse(_args["drift-test"], CultureInfo.InvariantCulture)); return;
+        }
         if (Capturing) { _ = Capture(); return; }
         Streamer.StartWorker();
         Player.Activate();
@@ -458,6 +463,7 @@ public partial class Main : Node3D
         int gc1 = GC.CollectionCount(1), gc2 = GC.CollectionCount(2);
         var gcPause = GC.GetTotalPauseDuration(); long gcAlloc = GC.GetTotalAllocatedBytes();
         long memStart = (long)OS.GetStaticMemoryUsage(), memPeak = memStart;
+        double fpsSum = 0, fpsMin = double.MaxValue; int fpsN = 0;
         var frame = Stopwatch.StartNew();
         GD.Print("DRIFT t, x, z, speed, water speed, depth, tilt");
         while (t < seconds)
@@ -469,6 +475,7 @@ public partial class Main : Node3D
             {
                 worstFrameMs = Math.Max(worstFrameMs, ms); windowFrameMs = Math.Max(windowFrameMs, ms); windowFrameSum += ms; windowFrames++;
                 if (ms > 8.0) { windowSlow++; totalSlow++; }
+                fpsSum += Engine.GetFramesPerSecond(); fpsN++; fpsMin = Math.Min(fpsMin, Engine.GetFramesPerSecond());
             }
             var up = Raft.GlobalTransform.Basis.Y;
             maxTilt = MathF.Max(maxTilt, Mathf.RadToDeg(up.AngleTo(Vector3.Up)));
@@ -536,7 +543,7 @@ public partial class Main : Node3D
                  $"segments {firstSeg} → {lastSeg} ({seamsCrossed} seams crossed), max speed {maxSpeed:F2} m/s, max tilt {maxTilt:F1}°, " +
                  $"grounded {Raft.GroundedTime:F0} s ({groundedAtSeam} times within {RiverWorld.Blend:F0} m of a seam)");
         totalFrames += windowFrames;
-        GD.Print($"STREAM RESULT: worst frame {worstFrameMs:F1} ms after the first 5 s, {totalSlow} of {totalFrames} frames over 8 ms, " +
+        GD.Print($"STREAM RESULT: rendering {fpsSum / Math.Max(1, fpsN):F0} fps mean, {(fpsN > 0 ? fpsMin : 0):F0} lowest; worst frame {worstFrameMs:F1} ms after the first 5 s, {totalSlow} of {totalFrames} frames over 8 ms, " +
                  $"memory {memStart / 1048576} → {memEnd / 1048576} MB (peak {memPeak / 1048576} MB)");
         GetTree().Quit();
     }

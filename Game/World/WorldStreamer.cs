@@ -56,9 +56,15 @@ public partial class WorldStreamer : Node3D
     readonly Dictionary<int, SegmentView> _views = new();
     readonly List<SegmentView> _attaching = new();
 
+    /// <summary>Real tree meshes near the camera (null if the tree packs aren't there: placeholders are used).</summary>
+    public TreeLod Trees { get; private set; }
+
     public void Setup(CourseSettings cs, string cacheDir, string cacheKey, EnvironmentRig env)
     {
         _cs = cs; _cacheDir = cacheDir; _cacheKey = cacheKey; Env = env;
+        // "--no-trees" (after "--"): the old placeholder trees (performance comparisons, weak machines).
+        if (Array.IndexOf(OS.GetCmdlineUserArgs(), "--no-trees") < 0) TreeLibrary.Load();
+        if (TreeLibrary.Loaded) { Trees = new TreeLod { Name = "Trees" }; AddChild(Trees); }
         World = new RiverWorld(new Course(cs));
         _wCourse = new Course(cs);
         _wWorld = new RiverWorld(_wCourse);
@@ -237,6 +243,7 @@ public partial class WorldStreamer : Node3D
             }
             _views[v.K] = v;
             AddChild(v.Root);
+            if (v.Trees != null) Trees?.Add(v.K, v.Trees);
             _attaching.Add(v);
             WaterMaterials.Add(v.WaterMat);
             Env.Waters.Add(v.WaterMat);
@@ -247,6 +254,7 @@ public partial class WorldStreamer : Node3D
     void DropView(int k)
     {
         if (!_views.Remove(k, out var v)) return;
+        Trees?.Remove(k);
         _attaching.Remove(v);
         WaterMaterials.Remove(v.WaterMat);
         Env.Waters.Remove(v.WaterMat);

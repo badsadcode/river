@@ -19,6 +19,7 @@ public sealed class SegmentView
     public ReachField Field;                       // baked
     public ShaderMaterial WaterMat, TerrainMat;
     public FogVolume Mist;
+    public TreeSet Trees;                          // real trees in world space (TreeLod draws them near the camera)
     /// <summary>(parent, child) pairs still to be attached, in order.</summary>
     public readonly Queue<(Node parent, Node child)> Pending = new();
     public bool Attached => Pending.Count == 0;
@@ -47,7 +48,14 @@ public sealed class SegmentView
         v.WaterMat = WaterBuilder.CreateMaterial(tex);
         v.WaterMat.SetShaderParameter("frame_rot", new Vector2(MathF.Cos(f.Frame.Heading), MathF.Sin(f.Frame.Heading)));
         var water = WaterBuilder.Build(f, v.WaterMat, false);
-        var veg = Vegetation.Build(f, Owns);
+        var trees = new List<(Transform3D, ushort)>();
+        var veg = Vegetation.Build(f, Owns, trees);
+        if (trees.Count > 0)
+        {
+            var rootXf = new Transform3D(new Basis(Vector3.Up, f.Frame.Heading), v.Root.Position);
+            for (int i = 0; i < trees.Count; i++) trees[i] = (rootXf * trees[i].Item1, trees[i].Item2);
+            v.Trees = new TreeSet(trees);
+        }
         v.Mist = env.CreateMist(f, tex);
 
         // Attach order: the (emptied) groups, then their children one by one, then the mist.

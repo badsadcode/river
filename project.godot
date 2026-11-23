@@ -37,3 +37,10 @@ lights_and_shadows/directional_shadow/size=8192
 lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
 environment/volumetric_fog/volume_size=96
 environment/volumetric_fog/volume_depth=96
+
+[shader_globals]
+
+tree_camera={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}

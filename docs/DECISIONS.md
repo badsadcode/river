@@ -195,3 +195,21 @@ Next tiers (not done): oxbows, side channels, gorges, rapids, snags, braided rea
 - In course segments, small bars stand ≥ 0.1 m clear of the water (the water mesh, drawn 5 m onto land, hid them).
 - Shots for checking: `gorge`, `gorge_top`, `braided`, `side_channel`, `oxbow`, `snag`.
 Still to do (tier 3): rapids and a waterfall with portage, island labyrinths, reeds and lily pads on oxbows.
+
+## D18 — Real trees (NoorForm packs)
+- Tom's NoorForm packs in `Assets/Trees` (Noor Interchange: GLB per LOD + `*.manifest.json`): Birch, Oak, Pine,
+  Spruce, 5 variants each (`TreeLibrary.VariantsPerSpecies`; the export excludes variants 06–10 and the jungle tree).
+  Loaded once on the main thread (~0.8 s). Each LOD's Trunk + Leaves are merged into one two-surface mesh; LODs 1–2
+  reuse LOD 0's materials (the packs embed the same textures in every LOD). `Foliage.gdshader`: pack maps, alpha cut
+  0.5 boosted by mip level (crowns don't thin out far away), simple wind (height sway; the pack's UV2 bend/flutter).
+  Tree textures import VRAM-compressed.
+- **LOD**: real meshes are chosen per tree, by distance, using the manifest's ranges (`TreeLod`): every drawn
+  segment's trees sit in 32 m cells in world space; when the camera has moved 2 m (≤ 10×/s) the trees within range
+  are written into one MultiMesh per variant and LOD (60 draws, buffers reused, no garbage). Beyond LOD 2 the
+  segment's static billboard MultiMeshes (512 m blocks) draw them; billboards hide per tree within that range in the
+  vertex shader, against a global `tree_camera` (set each frame, so shadow passes use the main camera too).
+- **Placement** (same density mask as before): spruce on valley walls and cool patches, pine on drier ground, birch
+  along the water and wood edges (a stand-in for alder/willow, no packs yet), oak in the open floodplain. Bushes are
+  still the placeholders.
+- Cost: 80 vs 100 fps from the deck at 1600×900 on Tom's machine (≈ 2.5 ms a frame). `--no-trees` brings the old
+  placeholders back. The windowed drift test now looks from the deck and reports fps.
