@@ -55,6 +55,21 @@ bool same = true;
 for (int i = 0; i < field.Height.Length && same; i++) same = field.Height[i] == again.Height[i] && field.VelX[i] == again.VelX[i];
 Check(same, "same seed gives the same reach");
 
+if (Array.IndexOf(args, "--reference") >= 0)
+{
+    // Compare against a fully converged single-level solve (slow).
+    var refField = ReachGenerator.Generate(new ReachSettings { ReferencePicardSteps = 8 }, m => { if (m.Contains("step")) Console.WriteLine("  ref " + m); });
+    double se = 0, sv = 0; int n = 0; float worst = 0;
+    for (int i = 0; i < field.Water.Length; i++)
+    {
+        if (!field.Water[i]) continue;
+        float de = field.Eta[i] - refField.Eta[i];
+        float dv = MathF.Sqrt(MathF.Pow(field.VelX[i] - refField.VelX[i], 2) + MathF.Pow(field.VelZ[i] - refField.VelZ[i], 2));
+        se += de * de; sv += dv * dv; n++; worst = MathF.Max(worst, dv);
+    }
+    Console.WriteLine($"  vs reference: surface rms {Math.Sqrt(se / n) * 100:F1} cm, current rms {Math.Sqrt(sv / n):F3} m/s, worst {worst:F2} m/s");
+}
+
 if (mapPath != null) { MapRender.Write(field, mapPath); Console.WriteLine($"map: {mapPath}"); }
 Console.WriteLine(failures == 0 ? "ALL PASS" : $"{failures} FAILED");
 return failures == 0 ? 0 : 1;

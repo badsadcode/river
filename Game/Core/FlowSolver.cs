@@ -36,7 +36,102 @@ public static class FlowSolver
         public double Residual;     // final relative residual of the last solve
     }
 
-    public static Result Solve(in Problem p, int picardSteps = 4, Action<string> log = null)
+    /// <summary>
+    /// Multilevel solve: the nonlinear (Picard) iterations run on a grid coarsened 2× per level, and each finer
+    /// level starts from the coarser answer, so the expensive fine grid needs one or two CG solves from a good
+    /// start instead of several from scratch. Same equations, same final tolerance.
+    /// </summary>
+    public static Result SolveMultilevel(in Problem p, Action<string> log = null, int depth = 0)
+    {
+        bool canCoarsen = p.Nx % 2 == 1 && p.Nz % 2 == 1 && p.Nx * p.Nz > 60000;
+        if (!canCoarsen) return Solve(p, 3, log, null, depth);
+        var coarse = Coarsen(p);
+        var cr = SolveMultilevel(coarse, log, depth + 1);
+        var start = Prolong(cr.Eta, coarse, p);
+        var fine = Solve(p, depth == 0 ? 2 : 1, log, start, depth);
+        fine.Iterations += cr.Iterations;
+        return fine;
+    }
+
+    /// <summary>Every second node in both directions (grid dimensions must be odd).</summary>
+    static Problem Coarsen(in Problem p)
+    {
+        int cx = (p.Nx + 1) / 2, cz = (p.Nz + 1) / 2, ct = cx * cz;
+        var c = new Problem
+        {
+            Nx = cx, Nz = cz, Cell = p.Cell * 2f, FixedEta = p.FixedEta, Manning = p.Manning, RefSlope = p.RefSlope,
+            Active = new bool[ct], Fixed = new bool[ct], Depth = new float[ct], Source = new float[ct],
+        };
+        for (int z = 0; z < cz; z++)
+            for (int x = 0; x < cx; x++)
+            {
+                int fi = (2 * z) * p.Nx + 2 * x, ci = z * cx + x;
+                c.Active[ci] = p.Active[fi]; c.Fixed[ci] = p.Fixed[fi]; c.Depth[ci] = p.Depth[fi];
+            }
+        // Coarse nodes cut off from the outlet would make the system singular: drop them.
+        var reach = new bool[ct];
+        var stack = new System.Collections.Generic.Stack<int>();
+        for (int i = 0; i < ct; i++) if (c.Active[i] && c.Fixed[i]) { reach[i] = true; stack.Push(i); }
+        while (stack.Count > 0)
+        {
+            int i = stack.Pop(), ix = i % cx, iz = i / cx;
+            void Visit(int j) { if (c.Active[j] && !reach[j]) { reach[j] = true; stack.Push(j); } }
+            if (ix > 0) Visit(i - 1); if (ix < cx - 1) Visit(i + 1);
+            if (iz > 0) Visit(i - cx); if (iz < cz - 1) Visit(i + cx);
+        }
+        for (int i = 0; i < ct; i++) c.Active[i] = reach[i];
+        // Move each fine source to the nearest reachable coarse node.
+        for (int fi = 0; fi < p.Source.Length; fi++)
+        {
+            if (p.Source[fi] == 0f) continue;
+            int fx = fi % p.Nx, fz = fi / p.Nx, best = -1, bd = int.MaxValue;
+            for (int dz = -2; dz <= 2; dz++)
+                for (int dx = -2; dx <= 2; dx++)
+                {
+                    int x = (fx + 1) / 2 + dx, z = (fz + 1) / 2 + dz;
+                    if (x < 0 || z < 0 || x >= cx || z >= cz || !c.Active[z * cx + x]) continue;
+                    int d = (2 * x - fx) * (2 * x - fx) + (2 * z - fz) * (2 * z - fz);
+                    if (d < bd) { bd = d; best = z * cx + x; }
+                }
+            if (best >= 0) c.Source[best] += p.Source[fi];
+        }
+        return c;
+    }
+
+    /// <summary>Coarse surface → starting surface on the fine grid (average of the active coarse corners).</summary>
+    static float[] Prolong(float[] ce, in Problem c, in Problem f)
+    {
+        var e = new float[f.Nx * f.Nz];
+        for (int z = 0; z < f.Nz; z++)
+            for (int x = 0; x < f.Nx; x++)
+            {
+                float sum = 0f; int cnt = 0;
+                for (int dz = 0; dz <= (z & 1); dz++)
+                    for (int dx = 0; dx <= (x & 1); dx++)
+                    {
+                        int ci = (z / 2 + dz) * c.Nx + x / 2 + dx;
+                        if (c.Active[ci]) { sum += ce[ci]; cnt++; }
+                    }
+                e[z * f.Nx + x] = cnt > 0 ? sum / cnt : float.NaN;
+            }
+        // Fine nodes with no active coarse corner (narrow spots): take a neighbour's value.
+        for (int pass = 0; pass < 6; pass++)
+            for (int i = 0; i < e.Length; i++)
+            {
+                if (!float.IsNaN(e[i])) continue;
+                int ix = i % f.Nx, iz = i / f.Nx;
+                float v = float.NaN;
+                if (ix > 0 && !float.IsNaN(e[i - 1])) v = e[i - 1];
+                else if (ix < f.Nx - 1 && !float.IsNaN(e[i + 1])) v = e[i + 1];
+                else if (iz > 0 && !float.IsNaN(e[i - f.Nx])) v = e[i - f.Nx];
+                else if (iz < f.Nz - 1 && !float.IsNaN(e[i + f.Nx])) v = e[i + f.Nx];
+                e[i] = v;
+            }
+        for (int i = 0; i < e.Length; i++) if (float.IsNaN(e[i])) e[i] = f.FixedEta;
+        return e;
+    }
+
+    public static Result Solve(in Problem p, int picardSteps = 4, Action<string> log = null, float[] initialEta = null, int level = 0)
     {
         int nx = p.Nx, nz = p.Nz, total = nx * nz;
         // Compact indexing of unknowns.
@@ -47,8 +142,8 @@ public static class FlowSolver
         for (int i = 0; i < total; i++) if (ui[i] >= 0) node[ui[i]] = i;
 
         var eta = new float[total];
-        // Initial guess: fixed level everywhere (CG warms up quickly from the previous step afterwards).
-        for (int i = 0; i < total; i++) eta[i] = p.FixedEta;
+        // Initial guess: a coarser solution if we have one, else the fixed level everywhere.
+        for (int i = 0; i < total; i++) eta[i] = initialEta != null ? initialEta[i] : p.FixedEta;
 
         var kNode = new float[total];
         var x = new double[n];
@@ -61,7 +156,7 @@ public static class FlowSolver
             {
                 if (!p.Active[i]) { kNode[i] = 0; continue; }
                 float h = MathF.Max(p.Depth[i], 0.03f);
-                float s = step == 0 ? p.RefSlope : Slope(eta, p.Active, nx, nz, i, p.Cell);
+                float s = step == 0 && initialEta == null ? p.RefSlope : Slope(eta, p.Active, nx, nz, i, p.Cell);
                 s = Math.Clamp(s, p.RefSlope * 0.15f, p.RefSlope * 60f);
                 kNode[i] = MathF.Pow(h, 5f / 3f) / (p.Manning * MathF.Sqrt(s));
             }
@@ -91,10 +186,10 @@ public static class FlowSolver
             }
 
             for (int u = 0; u < n; u++) x[u] = eta[node[u]] - p.FixedEta;
-            var (iters, res) = Pcg(n, diag, nb, w, b, x, step == picardSteps - 1 ? 1e-7 : 1e-5, 20000);
+            var (iters, res) = Pcg(n, diag, nb, w, b, x, step == picardSteps - 1 && level == 0 ? 1e-7 : 1e-5, 20000);
             totalIters += iters; lastRes = res;
             for (int u = 0; u < n; u++) eta[node[u]] = p.FixedEta + (float)x[u];
-            log?.Invoke($"flow step {step}: {iters} CG iterations, residual {res:E2}");
+            log?.Invoke($"flow level {level} ({nx}×{nz}) step {step}: {iters} CG iterations, residual {res:E2}");
         }
 
         return new Result { Eta = eta, Iterations = totalIters, Residual = lastRes };

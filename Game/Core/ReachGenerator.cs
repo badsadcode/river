@@ -15,6 +15,7 @@ public sealed class ReachSettings
     public float OutletEta = 20f;        // water surface height where the reach leaves the grid (m)
     public float Manning = 0.035f;       // natural channel with some gravel and weeds
     public float RefSlope = 0.0005f;     // typical surface slope (first flow iteration only)
+    public int ReferencePicardSteps = 0; // tests: > 0 = single-level solve with this many nonlinear steps
 }
 
 /// <summary>
@@ -180,7 +181,7 @@ public static class ReachGenerator
             Nx = nx, Nz = nz, Cell = s.Cell, Active = connected, Fixed = fixedNode, FixedEta = s.OutletEta,
             Depth = f.Depth, Source = source, Manning = s.Manning, RefSlope = s.RefSlope,
         };
-        var res = FlowSolver.Solve(problem, 3, m => Log(m));
+        var res = s.ReferencePicardSteps > 0 ? FlowSolver.Solve(problem, s.ReferencePicardSteps, m => Log(m)) : FlowSolver.SolveMultilevel(problem, m => Log(m));
         Array.Copy(res.Eta, f.Eta, total);
         ComputeVelocity(f, connected, s);
         Log($"flow solved ({res.Iterations} CG iterations), outflow {f.OutflowMeasured:F1} m³/s");

@@ -43,3 +43,10 @@ the deck.
 ## D8 — Software-rendered verification in the cloud
 Xvfb + Mesa lavapipe render real Forward+ frames without a GPU. Slow (minutes per batch), so captures take several
 shots per launch (`tools/capture.sh`).
+
+## D9 — Multilevel flow solve
+The nonlinear Picard iterations run on grids coarsened 2× per level (down to 76×201); each finer level starts from
+the coarser surface, and the 2 m grid needs only two CG solves. ~35 % faster than three single-level steps and
+closer to a fully converged 8-step reference (current within 0.025 m/s rms; `Tests/Core.Tests -- --reference`).
+Plain Jacobi-CG still needs ~5000 iterations on the fine grid; a better preconditioner (multigrid-preconditioned
+CG) is the next step if generation time matters again.
