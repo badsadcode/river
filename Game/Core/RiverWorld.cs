@@ -24,13 +24,60 @@ public sealed class RiverWorld
 
     public readonly Course Course;
     readonly Dictionary<int, ReachField> _segments = new();
+    readonly List<Rock> _rocks = new();
+    int _hint = 1;
 
     public RiverWorld(Course course) { Course = course; }
 
-    public void Add(int k, ReachField f) => _segments[k] = f;
-    public bool Remove(int k) => _segments.Remove(k);
+    public void Add(int k, ReachField f) { _segments[k] = f; RebuildRocks(); }
+    public bool Remove(int k) { bool r = _segments.Remove(k); RebuildRocks(); return r; }
     public bool TryGet(int k, out ReachField f) => _segments.TryGetValue(k, out f);
     public IEnumerable<int> Loaded => _segments.Keys;
+    /// <summary>The loaded segment indices into a list (no allocation, for per-frame use).</summary>
+    public void LoadedInto(List<int> into) { foreach (int k in _segments.Keys) into.Add(k); }
+
+    /// <summary>Rocks of all loaded segments in world coordinates (position and approaching current).</summary>
+    public IReadOnlyList<Rock> Rocks => _rocks;
+
+    void RebuildRocks()
+    {
+        _rocks.Clear();
+        foreach (var f in _segments.Values)
+        {
+            double co = Math.Cos(f.Frame.Heading), si = Math.Sin(f.Frame.Heading);
+            foreach (var r in f.Rocks)
+            {
+                var (wx, wz) = f.Frame.ToWorld(r.X, r.Z);
+                var w = r;
+                w.X = (float)wx; w.Z = (float)wz;
+                w.FlowX = (float)(r.FlowX * co + r.FlowZ * si); w.FlowZ = (float)(-r.FlowX * si + r.FlowZ * co);
+                _rocks.Add(w);
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- point queries (main thread: raft, player, HUD)
+
+    /// <summary>
+    /// The river at a world point. Where no loaded segment covers it (shouldn't happen around the raft), a dry
+    /// fallback at the course's level, so nothing falls through the world.
+    /// </summary>
+    public RiverSample At(double x, double z)
+    {
+        if (Sample(x, z, ref _hint, out var s)) return s;
+        var (sigma, _, _) = Course.ProjectOnValley(x, z, (int)(Course.Cuts[Math.Clamp(_hint, 0, Course.Cuts.Count - 1)] / Course.ValleyStep));
+        float eta = Course.Eta[Course.RiverIndexAt(sigma)];
+        return new RiverSample { Eta = eta, Height = eta + 1f, Depth = 0f };
+    }
+
+    public bool Covers(double x, double z) => Sample(x, z, ref _hint, out _);
+    public float EtaAt(double x, double z) => At(x, z).Eta;
+    public float HeightAt(double x, double z) => At(x, z).Height;
+    public float DepthAt(double x, double z) => At(x, z).Depth;
+    public (float x, float z) VelocityAt(double x, double z) { var s = At(x, z); return (s.VelX, s.VelZ); }
+
+    /// <summary>Segment index at a world point (around the last query).</summary>
+    public int SegmentAt(double x, double z) => _hint = SegmentAt(x, z, _hint);
 
     /// <summary>Signed distance of (x, z) downstream of cut j, measured along the valley there.</summary>
     public double PastCut(int j, double x, double z)
@@ -79,8 +126,9 @@ public sealed class RiverWorld
         int k = SegmentAt(x, z, hint);
         hint = k;
         bool has = SampleSegment(k, x, z, out s);
-        // Blend with the upstream neighbour near cut k, or the downstream one near cut k+1.
-        foreach (int j in new[] { k, k + 1 })
+        // Blend with the upstream neighbour near cut k, or the downstream one near cut k+1. (No allocations here: the
+        // raft calls this thousands of times a second, and garbage means collector pauses.)
+        for (int j = k; j <= k + 1; j++)
         {
             if (j <= 0 || j >= Course.Cuts.Count - 1) continue;
             double d = PastCut(j, x, z);

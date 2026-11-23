@@ -54,11 +54,27 @@ uniform int debug_view = 0;
 uniform float wave_time = 0.0;
 uniform float wave_strength = 1.0;
 
+// The segment this mesh belongs to (docs/STREAMING.md §5): meshes are built in the segment's grid coordinates and
+// placed by the node's transform, so the field is sampled with the model-space position; patterns (ripples, waves,
+// foam) use world positions so they run on across segments. The field's current is in grid axes: frame_rot
+// (cos, sin of the heading) turns it into world axes. Neighbours overlap; each draws only its side of the cut lines
+// (clip_a: keep where dot(p − a.xy, a.zw) ≥ 0, clip_b: keep where < 0), once that neighbour is there.
+uniform vec2 frame_rot = vec2(1.0, 0.0);
+uniform vec4 clip_a = vec4(0.0);
+uniform vec4 clip_b = vec4(0.0);
+uniform float clip_a_on = 0.0;
+uniform float clip_b_on = 0.0;
+
 varying vec3 v_world;
+varying vec2 v_local;
 varying vec2 v_wave_grad;
 
-vec2 field_uv(vec2 xz) {
-	return (xz / field_cell + 0.5) / field_size;
+vec2 field_uv(vec2 local_xz) {
+	return (local_xz / field_cell + 0.5) / field_size;
+}
+
+vec2 to_world_dir(vec2 v) {
+	return vec2(v.x * frame_rot.x + v.y * frame_rot.y, -v.x * frame_rot.y + v.y * frame_rot.x);
 }
 
 // Mirror of SurfaceWaves.Gust(): wind strength patches, shared by the waves and the ripples.
@@ -129,23 +145,29 @@ float rock_bump(vec2 p, vec4 r, vec2 fl) {
 	return hv * deep * (emerg * (pillow - 0.35 * sides - 0.55 * hollow) + (1.0 - emerg) * (0.6 * hump - 0.4 * hollow));
 }
 
-float surface_height(vec2 p, vec4 f, float calm) {
-	float h = wave_height(p, wave_time, f.xy, f.z, calm);
-	for (int i = 0; i < rock_count; i++) h += rock_bump(p, rocks[i], rock_flow[i]);
+// Waves at world position p (current in world axes), rock bumps at grid position q (rocks are grid-local).
+float surface_height(vec2 p, vec2 q, vec2 v_world_dir, float depth, float calm) {
+	float h = wave_height(p, wave_time, v_world_dir, depth, calm);
+	for (int i = 0; i < rock_count; i++) h += rock_bump(q, rocks[i], rock_flow[i]);
 	return h;
 }
 
 void vertex() {
 	vec3 w = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	vec4 f = textureLod(flow_tex, field_uv(w.xz), 0.0);
-	float calm = textureLod(shape_tex, field_uv(w.xz), 0.0).a;
+	vec2 q = VERTEX.xz;
+	vec4 f = textureLod(flow_tex, field_uv(q), 0.0);
+	float calm = textureLod(shape_tex, field_uv(q), 0.0).a;
+	vec2 vw = to_world_dir(f.xy);
 	const float e = 0.3;
-	float h = surface_height(w.xz, f, calm);
-	float hx = surface_height(w.xz + vec2(e, 0.0), f, calm);
-	float hz = surface_height(w.xz + vec2(0.0, e), f, calm);
-	v_wave_grad = vec2(hx - h, hz - h) / e * wave_strength;
-	VERTEX.y += h * wave_strength;   // water meshes are built in world space (identity model matrix)
+	// World steps of e along x and z, and the same steps in grid coordinates.
+	vec2 qx = vec2(frame_rot.x, frame_rot.y) * e, qz = vec2(-frame_rot.y, frame_rot.x) * e;
+	float h = surface_height(w.xz, q, vw, f.z, calm);
+	float hx = surface_height(w.xz + vec2(e, 0.0), q + qx, vw, f.z, calm);
+	float hz = surface_height(w.xz + vec2(0.0, e), q + qz, vw, f.z, calm);
+	v_wave_grad = vec2(hx - h, hz - h) / e * wave_strength;   // world-space slope
+	VERTEX.y += h * wave_strength;
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	v_local = VERTEX.xz;
 }
 
 vec3 view_pos_at(vec2 uv, mat4 inv_proj) {
@@ -211,21 +233,26 @@ vec3 flow_normal_live(sampler2D tex, vec2 xz, vec2 flow, float scale, float cycl
 }
 
 void fragment() {
+	// Only this segment's side of the cut lines (the neighbour draws the rest).
+	if (clip_a_on > 0.5 && dot(v_world.xz - clip_a.xy, clip_a.zw) < 0.0) discard;
+	if (clip_b_on > 0.5 && dot(v_world.xz - clip_b.xy, clip_b.zw) >= 0.0) discard;
 	float t = TIME + time_offset;
-	vec2 xz = v_world.xz;
-	vec2 fuv = field_uv(xz);
+	vec2 xz = v_world.xz;          // patterns: world
+	vec2 q = v_local;              // field lookups: this segment's grid
+	vec2 fuv = field_uv(q);
 	vec4 fl = texture(flow_tex, fuv);
 	vec4 sh = texture(shape_tex, fuv);
-	vec2 flow_true = fl.xy;
+	vec2 flow_true = to_world_dir(fl.xy);
 	float speed = length(flow_true);
 	// Textures are carried by a smoothed current: around rocks and in eddies the real current turns within a few
 	// metres, and dragging a texture through that winds it into whirlpool rings. Averaged over ~3 m, and the drag per
 	// flow-map cycle is capped (adv_cap) so nothing gets stretched far beyond its own size.
-	vec2 flow = 0.4 * flow_true;
-	flow += 0.15 * texture(flow_tex, field_uv(xz + vec2(adv_smooth, 0.0))).xy;
-	flow += 0.15 * texture(flow_tex, field_uv(xz - vec2(adv_smooth, 0.0))).xy;
-	flow += 0.15 * texture(flow_tex, field_uv(xz + vec2(0.0, adv_smooth))).xy;
-	flow += 0.15 * texture(flow_tex, field_uv(xz - vec2(0.0, adv_smooth))).xy;
+	vec2 flow_grid = 0.4 * fl.xy;
+	flow_grid += 0.15 * texture(flow_tex, field_uv(q + vec2(adv_smooth, 0.0))).xy;
+	flow_grid += 0.15 * texture(flow_tex, field_uv(q - vec2(adv_smooth, 0.0))).xy;
+	flow_grid += 0.15 * texture(flow_tex, field_uv(q + vec2(0.0, adv_smooth))).xy;
+	flow_grid += 0.15 * texture(flow_tex, field_uv(q - vec2(0.0, adv_smooth))).xy;
+	vec2 flow = to_world_dir(flow_grid);
 	float fspeed = length(flow);
 	if (fspeed > adv_cap) flow *= adv_cap / fspeed;
 	float depth_field = fl.z;

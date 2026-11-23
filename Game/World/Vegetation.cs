@@ -15,7 +15,11 @@ public static class Vegetation
 {
     const float Block = 256f;
 
-    public static Node3D Build(ReachField f)
+    /// <summary>
+    /// Vegetation and rocks in the field's grid coordinates. <paramref name="owns"/> (grid x, z → bool), if given,
+    /// keeps only what this segment owns (neighbours overlap; each plants its own side of the cuts).
+    /// </summary>
+    public static Node3D Build(ReachField f, Func<float, float, bool> owns = null)
     {
         var root = new Node3D { Name = "Vegetation" };
         var mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://Game/Shaders/Tree.gdshader") };
@@ -36,6 +40,7 @@ public static class Vegetation
             {
                 float px = x + rng.Range(-0.45f, 0.45f) * spacing, pz = z + rng.Range(-0.45f, 0.45f) * spacing;
                 if (!f.InDomain(px, pz)) continue;
+                if (owns != null && !owns(px, pz)) continue;
                 float shore = f.Sample(f.ShoreDist, px, pz);
                 if (shore < 3.5f) continue;
                 float hgt = f.SampleHeight(px, pz);
@@ -239,6 +244,9 @@ public static class Vegetation
             var mi = new MeshInstance3D { Mesh = mesh, MaterialOverride = mat, Position = pos };
             float speed = MathF.Sqrt(r.FlowX * r.FlowX + r.FlowZ * r.FlowZ);
             var dir = speed > 1e-3f ? new Vector2(r.FlowX / speed, r.FlowZ / speed) : new Vector2(0, 1);
+            // Grid axes → world axes (Rock.gdshader works in world space).
+            float co = MathF.Cos(f.Frame.Heading), si = MathF.Sin(f.Frame.Heading);
+            dir = new Vector2(dir.X * co + dir.Y * si, -dir.X * si + dir.Y * co);
             mi.SetInstanceShaderParameter("water_level", eta);
             mi.SetInstanceShaderParameter("flow", new Vector4(dir.X, dir.Y, speed, r.Radius));
             root.AddChild(mi);

@@ -10,10 +10,15 @@ uniform float density = 0.06;
 uniform float layer_height = 2.5;     // metres of mist above the water (e-folding)
 uniform vec3 albedo : source_color = vec3(0.92, 0.93, 0.95);
 uniform vec2 drift = vec2(0.25, 0.6);
+// The segment's grid: world → grid = rotate(world − origin) by −heading (frame_rot = cos, sin of the heading).
+uniform vec2 frame_origin = vec2(0.0);
+uniform vec2 frame_rot = vec2(1.0, 0.0);
 
 void fog() {
 	vec3 wp = WORLD_POSITION;
-	vec2 fuv = (wp.xz / field_cell + 0.5) / field_size;
+	vec2 d = wp.xz - frame_origin;
+	vec2 local = vec2(d.x * frame_rot.x - d.y * frame_rot.y, d.x * frame_rot.y + d.y * frame_rot.x);
+	vec2 fuv = (local / field_cell + 0.5) / field_size;
 	vec4 sh = texture(shape_tex, fuv);
 	float h = wp.y - sh.r;
 	float near_water = 1.0 - smoothstep(-10.0, 70.0, sh.g);

@@ -14,15 +14,18 @@ public partial class EnvironmentRig : Node3D
 {
     public DirectionalLight3D Sun;          // the sun by day, the moon by night
     public WorldEnvironment WorldEnv;
-    public FogVolume Mist;
     public GameClock Clock;
     public float Latitude = 52f;            // degrees north; later: falls as the journey heads for the tropics
     public float Overcast;                  // 0 clear … 1 grey
     public float SunElevation { get; private set; }
     public Daylight.State Light { get; private set; }
 
-    public ShaderMaterial Water;            // the river material (night roughness)
-    ShaderMaterial _mistMat;
+    /// <summary>The live river materials (one per loaded segment), for the night roughness.</summary>
+    public readonly System.Collections.Generic.List<ShaderMaterial> Waters = new();
+    /// <summary>The live mist volumes (one per loaded segment), for density and colour.</summary>
+    readonly System.Collections.Generic.List<(FogVolume vol, ShaderMaterial mat)> _mists = new();
+    public bool MistHidden;                 // --nomist (captures)
+    NoiseTexture3D _mistNoise;
     ProceduralSkyMaterial _sky;
     float _skyTimer;
 
@@ -38,7 +41,7 @@ public partial class EnvironmentRig : Node3D
     public string PresetName => TimeLabel;
     public string TimeLabel => $"day {Clock.Day} · {Clock.Season} · {Clock.Clock}{(Overcast > 0.5f ? " · overcast" : "")}{(Clock.TimeScale > 1f ? $" · ×{Clock.TimeScale:0}" : "")}";
 
-    public void Setup(ReachField f, FieldTextures tex, SandboxSettings sandbox)
+    public void Setup(int seed, SandboxSettings sandbox)
     {
         var t = sandbox?.Time ?? new SandboxSettings.TimeGroup();
         Clock = new GameClock(t.DayLengthMinutes, t.SeasonLengthDays, t.StartingSeason, PresetHours[0]);
@@ -47,7 +50,7 @@ public partial class EnvironmentRig : Node3D
         _sky = new ProceduralSkyMaterial
         {
             SunAngleMax = 22f, SunCurve = 0.12f, GroundBottomColor = new Color(0.16f, 0.17f, 0.13f),
-            UseDebanding = true, SkyCover = StarTexture(2048, 1024, f.Seed), SkyCoverModulate = new Color(1, 1, 1, 0),
+            UseDebanding = true, SkyCover = StarTexture(2048, 1024, seed), SkyCoverModulate = new Color(1, 1, 1, 0),
         };
         var env = new Godot.Environment
         {
@@ -77,27 +80,40 @@ public partial class EnvironmentRig : Node3D
         };
         AddChild(Sun);
 
-        // Mist over the whole reach, hugging the water (Mist.gdshader reads the water level from the field).
-        float etaMin = float.MaxValue, etaMax = float.MinValue;
-        for (int i = 0; i < f.Eta.Length; i++) if (f.Water[i]) { etaMin = MathF.Min(etaMin, f.Eta[i]); etaMax = MathF.Max(etaMax, f.Eta[i]); }
-        _mistMat = new ShaderMaterial { Shader = GD.Load<Shader>("res://Game/Shaders/Mist.gdshader") };
-        tex.Apply(_mistMat);
-        _mistMat.SetShaderParameter("noise3d", new NoiseTexture3D
+        _mistNoise = new NoiseTexture3D
         {
             Width = 64, Height = 32, Depth = 64, Seamless = true,
-            Noise = new FastNoiseLite { Frequency = 0.06f, FractalOctaves = 3, Seed = f.Seed },
-        });
-        float h = etaMax - etaMin + 30f;
-        Mist = new FogVolume
-        {
-            Name = "RiverMist", Shape = RenderingServer.FogVolumeShape.Box,
-            Size = new Vector3(f.SizeX, h, f.SizeZ), Material = _mistMat,
-            Position = new Vector3(f.SizeX * 0.5f, etaMin - 2f + h * 0.5f, f.SizeZ * 0.5f),
+            Noise = new FastNoiseLite { Frequency = 0.06f, FractalOctaves = 3, Seed = seed },
         };
-        AddChild(Mist);
-
         UpdateLighting(true);
     }
+
+    /// <summary>
+    /// A mist volume over one segment (a rotated box hugging its water; Mist.gdshader reads the water level from the
+    /// segment's field). Returned for the caller to place in the segment's node; registered for density updates.
+    /// </summary>
+    public FogVolume CreateMist(ReachField f, FieldTextures tex)
+    {
+        float etaMin = float.MaxValue, etaMax = float.MinValue;
+        for (int i = 0; i < f.Eta.Length; i++) if (f.Water[i]) { etaMin = MathF.Min(etaMin, f.Eta[i]); etaMax = MathF.Max(etaMax, f.Eta[i]); }
+        if (etaMin > etaMax) { etaMin = 0f; etaMax = 0f; }
+        var mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://Game/Shaders/Mist.gdshader") };
+        tex.Apply(mat);
+        mat.SetShaderParameter("noise3d", _mistNoise);
+        mat.SetShaderParameter("frame_origin", new Vector2((float)f.Frame.OriginX, (float)f.Frame.OriginZ));
+        mat.SetShaderParameter("frame_rot", new Vector2(MathF.Cos(f.Frame.Heading), MathF.Sin(f.Frame.Heading)));
+        float h = etaMax - etaMin + 30f;
+        var vol = new FogVolume
+        {
+            Name = "RiverMist", Shape = RenderingServer.FogVolumeShape.Box,
+            Size = new Vector3(f.SizeX, h, f.SizeZ), Material = mat,
+            Position = new Vector3(f.SizeX * 0.5f, etaMin - 2f + h * 0.5f, f.SizeZ * 0.5f),
+        };
+        lock (_mists) _mists.Add((vol, mat));
+        return vol;
+    }
+
+    public void ForgetMist(FogVolume vol) { lock (_mists) _mists.RemoveAll(m => m.vol == vol); }
 
     // ------------------------------------------------------------------ controls
 
@@ -151,20 +167,26 @@ public partial class EnvironmentRig : Node3D
         env.TonemapExposure = st.Exposure;
         env.VolumetricFogDensity = st.FogDensity;
         env.VolumetricFogAlbedo = C(st.FogAlbedo);
-        _mistMat.SetShaderParameter("density", st.Mist);
-        _mistMat.SetShaderParameter("albedo", Color.FromHsv(0.6f, 0.05f, Mathf.Lerp(0.95f, 0.45f, st.Night)));
-        Mist.Visible = st.Mist > 0.001f;
+        if (!updateSky) return;
+        _skyTimer = 0.2f;   // slow changes (sky radiance, mist, lanterns): 5 times a second, not every frame
+
+        var mistAlbedo = Color.FromHsv(0.6f, 0.05f, Mathf.Lerp(0.95f, 0.45f, st.Night));
+        lock (_mists)
+            foreach (var (vol, mat) in _mists)
+            {
+                mat.SetShaderParameter(DensityName, st.Mist);
+                mat.SetShaderParameter(AlbedoName, mistAlbedo);
+                if (vol.IsInsideTree()) vol.Visible = st.Mist > 0.001f && !MistHidden;
+            }
 
         // At night the water's glints are moonlight on wet ripples: soften them so they don't bloom into blobs.
-        Water?.SetShaderParameter("roughness_boost", 0.07f * st.Night);
+        foreach (var w in Waters) w.SetShaderParameter(RoughnessBoostName, 0.07f * st.Night);
 
         // Lanterns: on from dusk to dawn.
         float lamp = 1f - Mathf.SmoothStep(1f, 7f, SunElevation);
-        foreach (var n in GetTree().GetNodesInGroup("night_lights"))
-            if (n is Light3D l) { float max = (float)l.GetMeta("max_energy", 1f); l.LightEnergy = max * lamp; l.Visible = lamp > 0.01f; }
+        foreach (var n in GetTree().GetNodesInGroup(NightLightsName))
+            if (n is Light3D l) { float max = (float)l.GetMeta(MaxEnergyName, 1f); l.LightEnergy = max * lamp; l.Visible = lamp > 0.01f; }
 
-        if (!updateSky) return;
-        _skyTimer = 0.2f;   // sky radiance is re-rendered incrementally; don't poke it every frame
         _sky.SkyTopColor = C(st.SkyTop);
         _sky.SkyHorizonColor = C(st.SkyHorizon);
         _sky.GroundHorizonColor = C(st.SkyHorizon) * 0.8f;
@@ -174,6 +196,10 @@ public partial class EnvironmentRig : Node3D
     }
 
     static Color C(Rgb c) => new(c.R, c.G, c.B);
+
+    // Names used repeatedly: string literals would allocate a new StringName on every call.
+    static readonly StringName DensityName = "density", AlbedoName = "albedo", RoughnessBoostName = "roughness_boost",
+                               NightLightsName = "night_lights", MaxEnergyName = "max_energy";
 
     /// <summary>Equirectangular star field: uniform over the sphere, a few bright ones, faint Milky Way band.</summary>
     static ImageTexture StarTexture(int w, int h, int seed)

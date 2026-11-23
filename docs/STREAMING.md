@@ -1,6 +1,6 @@
 # Endless streaming — plan
 
-*2026-11-23, Sage. Status: accepted; Tom's decisions in §9 (all four as recommended). Phase 0 done (D12), phase 1 (D13), phase 2 (D14). Next: phase 3.*
+*2026-11-23, Sage. Status: accepted; Tom's decisions in §9 (all four as recommended). Phase 0 done (D12), phase 1 (D13), phase 2 (D14), phase 3 (D15). Next: phase 4.*
 
 Today the world is one fixed 1.2 × 3.2 km reach laid along +z. This plan turns it into a river that never ends
 and can change direction, generated ahead of the raft and dropped behind it, with the water, terrain, raft
@@ -148,7 +148,7 @@ Each phase ends in something that runs, with the headless tests passing and a ca
 | 0 | **Refactor, no visible change.** `ReachField` gets a frame. The prototype layout moves out of `ReachGenerator` into a hand-written course. Segment generation takes a course slice. | Today's reach regenerates identically from the new code path (tests, map diff). |
 | 1 | **Course generator.** Valley heading with bearing and turn-radius limits, discharge growth, level profile, feature schedule from sandbox frequencies, cuts in plain stretches. | Headless: 50 km course map PNG; checks: never folds, min radius, η monotone, features never straddle cuts, deterministic. |
 | 2 | **Independent segments + seams.** Rotated grids, boundary rule (§4.1), overlap blending. | Headless: 4 segments generated *out of order*, stitched map PNG; seam checks: η jump < 3 cm, current jump < 10 cm/s in the channel (2 m rasters differ a few degrees at curved banks), blended seams no rougher than the river's own bends, discharge conserved across cuts, no terrain step. ✔ D14 |
-| 3 | **Streamer in Godot.** Window k−1…k+2, worker thread, sliced node building, `RiverWorld` façade, per-segment materials, disk cache. | Drift test runs 3 hours of game time unattended: no hitch > 8 ms, memory flat, the raft never grounds at a seam. |
+| 3 | **Streamer in Godot.** Window k−1…k+2, worker thread, sliced node building, `RiverWorld` façade, per-segment materials, disk cache. | Drift test runs 3 hours of game time unattended: no hitch > 8 ms, memory flat, the raft never grounds at a seam. ✔ D15 (memory flat, no grounding at seams; 26 of 650 k frames 8–23 ms from small GC pauses, ~1 per 7 min) |
 | 4 | **Floating origin.** Root shifting, double positions, pattern phase offsets. | Drift test 60 km: no jitter, waves continuous across shifts (test), captures identical before/after a shift. |
 | 5 | **Far land, mist, saves.** Course-based horizon, per-segment mist, journey save/load at any segment. | A save at km 40 loads in seconds; looking back up a long straight shows a believable valley. |
 

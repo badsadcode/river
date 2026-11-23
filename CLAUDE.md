@@ -21,15 +21,18 @@ Studio motto #001: *code shall remain understandable to whichever AI inherits th
 
 ## Layout
 * `Game/Core/` — pure C# (no Godot types): noise, centre lines, islands, the endless `Course` (1D journey),
-  `SegmentSpec`/`Frame`/`CourseSegments` (one segment's slice), `RiverWorld` (segments as one world), the segment generator (`ReachGenerator`), the flow solver, eddies,
-  surface waves, the field container and its cache. `PrototypeCourse` is the hand-made reach the game still uses.
+  `SegmentSpec`/`Frame`/`CourseSegments` (one segment's slice), `RiverWorld` (segments as one world),
+  `SegmentBake` (seam blend baked into a segment before drawing), the segment generator (`ReachGenerator`), the flow solver, eddies,
+  surface waves, the field container and its cache. `PrototypeCourse` is the hand-made reach (headless tests only).
   Testable headlessly. Streaming plan: `docs/STREAMING.md`.
-* `Game/World/` — Godot side of the world: field → GPU textures, terrain, water meshes, vegetation, environment.
+* `Game/World/` — Godot side of the world: `WorldStreamer` (segments around the raft, worker thread, cache),
+  `SegmentView` (one segment's nodes), field → GPU textures, terrain, water meshes, vegetation, environment.
 * `Game/Shaders/` — `River.gdshader` (the water), `Terrain.gdshader`, `Mist.gdshader` (fog volume), `Tree.gdshader`.
 * `Game/Raft/` — raft physics (`Raft.cs`) and its placeholder model and deck colliders (`RaftModel.cs`).
 * `Game/Player/` — first-person controller (walks in the raft's frame, swims, uses oar/pole/anchor).
 * `Game/Debug/` — fly camera, HUD.
-* `Game/Main.cs` — entry: generate/load reach, build everything, command-line capture and drift test.
+* `Game/Main.cs` — entry: start the streamer, raft and player; camera presets (relative to the raft or to the first
+  lake/riffle/rock/confluence/split), command-line capture, streamed drift test (STREAM lines: hitches, memory).
 
 ## Physics layers
 1 terrain + rocks · 2 raft hull · 3 (value 4) raft deck (walkable, follows the raft) · 4 (value 8) player.

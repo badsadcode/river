@@ -32,7 +32,7 @@ public static class ProceduralTextures
     public static ImageTexture WaterNormals(int size, int seed, int basePeriod, float strength)
     {
         var h = new float[size * size];
-        System.Threading.Tasks.Parallel.For(0, size, y =>
+        River.Core.Par.For(0, size, y =>
         {
             for (int x = 0; x < size; x++)
             {
@@ -71,7 +71,7 @@ public static class ProceduralTextures
     {
         var cloud = new float[size * size];
         var bubbles = new float[size * size];
-        System.Threading.Tasks.Parallel.For(0, size, y =>
+        River.Core.Par.For(0, size, y =>
         {
             for (int x = 0; x < size; x++)
             {

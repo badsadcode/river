@@ -55,7 +55,7 @@ public static class Eddies
         }
 
         var lee = new float[total];
-        System.Threading.Tasks.Parallel.For(0, nz, iz =>
+        Par.For(0, nz, iz =>
         {
             for (int ix = 0; ix < nx; ix++)
             {
@@ -234,7 +234,7 @@ public static class Eddies
     {
         var o = new float[a.Length];
         int n = alongX ? nx : nz, lines = alongX ? nz : nx;
-        System.Threading.Tasks.Parallel.For(0, lines, line =>
+        Par.For(0, lines, line =>
         {
             int At(int t) => alongX ? line * nx + t : t * nx + line;
             for (int t = 0; t < n; t++)

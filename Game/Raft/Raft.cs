@@ -29,7 +29,7 @@ public partial class Raft : RigidBody3D
     const float WaterDensity = 1000f, G = 9.81f;
     const int PointsAlong = 7, PointsAcross = 4;
 
-    public ReachField Field;
+    public RiverWorld World;                  // the streamed river (blended across segment seams)
     public AnimatableBody3D Deck;             // what the player walks on (moves with the raft)
     public Node3D OarPivot;                   // the sweep oar, rotated by steering input
     public Vector3 OarHandleLocal;            // where the player stands to use the oar
@@ -58,9 +58,9 @@ public partial class Raft : RigidBody3D
     /// <summary>The wave clock: the water shader is fed this, so the waves you see are the ones the raft rides.</summary>
     public float WaveTime => _time;
 
-    public void Setup(ReachField field, Vector3 position, float yaw)
+    public void Setup(RiverWorld world, Vector3 position, float yaw)
     {
-        Field = field;
+        World = world;
         Mass = RaftMass;
         CenterOfMassMode = CenterOfMassModeEnum.Custom;
         CenterOfMass = new Vector3(0, -0.04f, 0.2f);
@@ -90,24 +90,19 @@ public partial class Raft : RigidBody3D
 
     // ------------------------------------------------------------------ water sampling
 
-    public float WaterHeight(float x, float z)
-    {
-        float eta = Field.InDomain(x, z) ? Field.SampleEta(x, z) : Field.EtaTrend(z);
-        return eta + SmallWaves(x, z, _time);
-    }
+    public float WaterHeight(float x, float z) => World.EtaAt(x, z) + SmallWaves(x, z, _time);
 
     public Vector3 WaterVelocity(float x, float z)
     {
-        if (!Field.InDomain(x, z)) return new Vector3(0, 0, 0.6f);
-        var (vx, vz) = Field.SampleVelocity(x, z);
+        var (vx, vz) = World.VelocityAt(x, z);
         return new Vector3(vx, 0, vz);
     }
 
     /// <summary>Bed height (for poling, anchoring, grounding).</summary>
-    public float BedHeight(float x, float z) => Field.InDomain(x, z) ? Field.SampleHeight(x, z) : Field.EtaTrend(z) - 3f;
+    public float BedHeight(float x, float z) => World.HeightAt(x, z);
 
     /// <summary>The same surface the water mesh shows (Core/SurfaceWaves.cs): swell, chop, standing waves, rock pillows.</summary>
-    float SmallWaves(float x, float z, float t) => SurfaceWaves.Total(Field, x, z, t);
+    float SmallWaves(float x, float z, float t) => SurfaceWaves.Total(World, x, z, t);
 
     // ------------------------------------------------------------------ controls
 

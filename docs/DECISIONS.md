@@ -129,3 +129,32 @@ currents differ ≤ 15 cm/s, bank height ≤ 34 cm) and resolve a curved bank's 
 `RiverWorld` assigns each point to the segment between its cut lines and blends neighbours over ±120 m; blended,
 the current changes ≤ 2 cm/s per 2 m along the river across seams versus ≤ 9 cm/s in its own bends.
 Segment generation ≈ 3.7 s here. Checks in `Tests/Core.Tests` (segments 1–4 out of order); map `-- --world out.png`.
+
+## D15 — Streaming in the game (phase 3)
+The game now plays the endless course (the prototype reach stays in the headless tests). `World/WorldStreamer`
+keeps segments f−1 … f+2 drawn and f−2 … f+4 as data around the raft's segment f. A **worker thread** with its
+own `Course` and `RiverWorld` (deterministic, so they match the main thread's) loads a segment from the disk cache
+(`user://cache/seg_<seed>_<k>.bin`) or generates it, bakes its seams and builds its whole node tree off the main
+thread (Godot allows building resources and nodes outside the tree there). The main thread attaches the nodes a few
+per frame within 2 ms, and drops what leaves the window.
+- **Seams**: segments overlap by 150 m. `Core/SegmentBake` writes `RiverWorld`'s blended values (±120 m of each cut)
+  into a copy of the field before its meshes and textures are built, so both neighbours show the same surface at the
+  cut line; their shaders then discard everything across their cut lines (`clip_a`/`clip_b`, enabled once the
+  neighbour is attached). A segment is only drawn when both neighbours' data exist, so its bake is final.
+- **Placement**: each segment's node sits at its frame (position + Y rotation); meshes stay in grid coordinates.
+  Shaders sample the field with the model-space position and use world positions for every pattern (ripples, waves,
+  foam, caustics, gusts), so patterns run on across seams; the field's current is rotated into world axes first.
+- **Physics** (raft, player, HUD) query `RiverWorld` (blended), which also keeps every loaded rock in world space for
+  the shared `SurfaceWaves` (the raft rides the same pillows the water shows).
+- **Far land**: a coarse skirt from the course's valley 1.5 km either side of each grid and 800 m beyond its ends,
+  clipped at the cuts (rotated neighbours left wedges otherwise). Phase 5 replaces it with a proper horizon.
+- The editor/Debug build is now compiled optimised (segment generation was 4.5× slower than the exported game).
+- **Hitches, found by the 3-hour drift test** (`--drift-test`, STREAM lines): one heightmap collision per segment
+  took 1.4 s to enter the physics world → 128 m collision chunks, attached one by one (≤ 4 ms). Per-frame garbage
+  (string literals turned into `StringName` on every `SetShaderParameter`, a group query and lists per frame, HUD
+  text at 60 Hz) made the collector pause ~33 ms every ~100 s → names cached, slow updates at 5 Hz, HUD at 4 Hz,
+  `GCLatencyMode.SustainedLowLatency` plus a background collection after each generated segment. Generation's
+  parallel loops leave two cores free while streaming (`Core/Par`). Result over 3 h: 26 of 650 k frames over
+  8 ms (worst 23 ms, about one every 7 min), memory flat (≈ 410–530 MB), the raft crosses seams without grounding.
+- Terrain LOD ranges overlap by 40 m: with touching ranges and hysteresis margins a freshly added chunk could show
+  neither level (a hole to the sky).

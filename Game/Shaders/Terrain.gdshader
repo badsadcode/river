@@ -6,8 +6,15 @@ render_mode cull_back, specular_schlick_ggx;
 uniform sampler2D shape_tex : filter_linear, repeat_disable;  // eta, shore distance, terrain height
 uniform vec2 field_size = vec2(601.0, 1601.0);
 uniform float field_cell = 2.0;
-uniform float far_eta_a = 25.0;   // outside the field: water level trend a + b·z
+uniform float far_eta_a = 25.0;   // outside the field: water level trend a + b·z (grid z)
 uniform float far_eta_b = -0.001;
+// Segment placement (see River.gdshader): the field is sampled with the model-space (grid) position, patterns use
+// world positions, and each segment draws only its side of the cut lines once the neighbour is there.
+uniform vec4 clip_a = vec4(0.0);
+uniform vec4 clip_b = vec4(0.0);
+uniform float clip_a_on = 0.0;
+uniform float clip_b_on = 0.0;
+varying vec2 v_local;
 
 uniform vec3 grass_a : source_color = vec3(0.20, 0.29, 0.09);
 uniform vec3 grass_b : source_color = vec3(0.31, 0.36, 0.13);
@@ -26,6 +33,7 @@ varying vec3 v_wnormal;
 void vertex() {
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_wnormal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	v_local = VERTEX.xz;
 }
 
 float hash12(vec2 p) {
@@ -58,10 +66,12 @@ float caustics(vec2 p, float t) {
 }
 
 void fragment() {
-	vec2 fuv = (v_world.xz / field_cell + 0.5) / field_size;
+	if (clip_a_on > 0.5 && dot(v_world.xz - clip_a.xy, clip_a.zw) < 0.0) discard;
+	if (clip_b_on > 0.5 && dot(v_world.xz - clip_b.xy, clip_b.zw) >= 0.0) discard;
+	vec2 fuv = (v_local / field_cell + 0.5) / field_size;
 	bool inside = fuv.x > 0.0 && fuv.x < 1.0 && fuv.y > 0.0 && fuv.y < 1.0;
 	vec4 sh = texture(shape_tex, clamp(fuv, vec2(0.0), vec2(1.0)));
-	float eta = inside ? sh.r : far_eta_a + far_eta_b * v_world.z;
+	float eta = inside ? sh.r : far_eta_a + far_eta_b * v_local.y;
 	float shore = inside ? sh.g : 200.0;
 	float above = v_world.y - eta;
 	// Water is only drawn within ~5 m of the shore (WaterBuilder). Floodplain hollows further out can dip below the

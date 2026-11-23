@@ -457,7 +457,7 @@ public static class ReachGenerator
     internal static void BoxBlur(float[] a, float[] o, int nx, int nz, int r, bool alongX)
     {
         int n = alongX ? nx : nz, lines = alongX ? nz : nx;
-        System.Threading.Tasks.Parallel.For(0, lines, line =>
+        Par.For(0, lines, line =>
         {
             double sum = 0; int cnt = 0;
             int At(int t) => alongX ? line * nx + t : t * nx + line;
@@ -527,7 +527,7 @@ public static class ReachGenerator
         for (int i = 0; i < total; i++) decay[i] = MathUtil.Lerp(0.93f, 0.985f, f.Eddy != null ? f.Eddy[i] : 0f);
         for (int it = 0; it < 50; it++)
         {
-            System.Threading.Tasks.Parallel.For(0, nz, iz =>
+            Par.For(0, nz, iz =>
             {
                 for (int ix = 0; ix < nx; ix++)
                 {

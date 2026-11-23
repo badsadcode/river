@@ -6,6 +6,11 @@
     <LangVersion>12</LangVersion>
     <RootNamespace>River</RootNamespace>
   </PropertyGroup>
+  <!-- The editor and captures run the Debug assembly: unoptimised, segment generation was ~4.5× slower than the
+       exported game. Optimise it too, so captures and drift tests measure what players get. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <Optimize>true</Optimize>
+  </PropertyGroup>
   <ItemGroup>
     <Compile Remove="Tests/**" />
   </ItemGroup>

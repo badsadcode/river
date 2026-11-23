@@ -36,18 +36,26 @@ public partial class Hud : CanvasLayer
         }
     }
 
+    double _refresh;
+
     public override void _Process(double delta)
     {
         var main = River.Main.Instance;
         if (main?.Raft == null) return;
         _help.Visible = _showHelp;
+        _info.Position = new Vector2(24, _showHelp ? 70 : 20);
+        // Text 4 times a second: rebuilding strings every frame is garbage the collector has to pause for.
+        _refresh -= delta;
+        if (_refresh > 0) return;
+        _refresh = 0.25;
         var r = main.Raft; var p = r.GlobalPosition; var pl = main.Player;
         var wv = r.WaterVelocity(p.X, p.Z);
         string state = pl.AtOar ? "at the sweep oar" : pl.Poling ? "poling" : pl.Swimming ? "swimming" : pl.OnRaft ? "on deck" : "ashore";
         string line = $"{main.Env.TimeLabel} · {state}{(r.AnchorDown ? " · anchored" : "")}{(r.Grounded ? " · aground!" : "")}";
         if (_showInfo)
-            line += $"\nraft {r.LinearVelocity.Length():F2} m/s · current {wv.Length():F2} m/s · depth {main.Field.SampleDepth(p.X, p.Z):F1} m · " +
-                    $"sun {main.Env.SunElevation:F0}° · {Engine.GetFramesPerSecond()} fps · pos {p.X:F0}, {p.Z:F0}";
+            line += $"\nraft {r.LinearVelocity.Length():F2} m/s · current {wv.Length():F2} m/s · depth {main.World.DepthAt(p.X, p.Z):F1} m · " +
+                    $"sun {main.Env.SunElevation:F0}° · {Engine.GetFramesPerSecond()} fps · pos {p.X:F0}, {p.Z:F0} · " +
+                    $"segment {main.World.SegmentAt(p.X, p.Z)} · {main.Distance / 1000f:F1} km";
         _info.Text = line;
         _info.Position = new Vector2(24, _showHelp ? 70 : 20);
     }

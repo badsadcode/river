@@ -255,7 +255,8 @@ public partial class PlayerController : CharacterBody3D
         var focus = OnRaft || _atOar ? _raft.GlobalPosition + Vector3.Up * 1.2f : GlobalPosition + Vector3.Up * 1.4f;
         var offset = new Vector3(MathF.Sin(_chaseYaw) * MathF.Cos(_chasePitch), -MathF.Sin(_chasePitch), MathF.Cos(_chaseYaw) * MathF.Cos(_chasePitch)) * _chaseDist;
         var pos = focus + offset;
-        float ground = Main.Instance.Field.InDomain(pos.X, pos.Z) ? MathF.Max(Main.Instance.Field.SampleHeight(pos.X, pos.Z), Main.Instance.Field.SampleEta(pos.X, pos.Z)) : pos.Y - 10f;
+        var here = Main.Instance.World.At(pos.X, pos.Z);
+        float ground = MathF.Max(here.Height, here.Eta);
         pos.Y = MathF.Max(pos.Y, ground + 1.0f);
         _chase.GlobalPosition = _chase.GlobalPosition.Lerp(pos, 1f - MathF.Exp(-dt * 5f));
         _chase.LookAt(focus, Vector3.Up);

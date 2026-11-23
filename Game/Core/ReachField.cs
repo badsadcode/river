@@ -68,6 +68,17 @@ public sealed class ReachField
 
     public bool InDomain(float x, float z) => x >= 0 && z >= 0 && x <= SizeX && z <= SizeZ;
 
+    /// <summary>A copy with its own field arrays (centre lines, islands and rocks are shared/copied as-is).</summary>
+    public ReachField Clone()
+    {
+        var c = (ReachField)MemberwiseClone();
+        c.Water = (bool[])Water.Clone(); c.Still = (bool[])Still.Clone();
+        c.Height = (float[])Height.Clone(); c.Eta = (float[])Eta.Clone(); c.Depth = (float[])Depth.Clone();
+        c.VelX = (float[])VelX.Clone(); c.VelZ = (float[])VelZ.Clone(); c.Foam = (float[])Foam.Clone();
+        c.ShoreDist = (float[])ShoreDist.Clone(); c.Eddy = Eddy != null ? (float[])Eddy.Clone() : null;
+        return c;
+    }
+
     /// <summary>Distance along the main river of the centre-line sample nearest to (x, z) (planning/debug).</summary>
     public float MainDistanceAt(float x, float z) => Main.Nearest(x, z) * Centerline.Step;
 }

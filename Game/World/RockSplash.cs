@@ -20,6 +20,10 @@ public static class RockSplash
         if (speed < 0.25f || r.Top < -0.25f) return null;
         float dx = r.FlowX / speed, dz = r.FlowZ / speed;
         float eta = f.SampleEta(r.X, r.Z);
+        // The emitter sits in the segment's grid (its node's parent), but particles fly in world space: directions in
+        // world axes. (lx, lz) stays grid-local for the position.
+        float lx = dx, lz = dz, co = MathF.Cos(f.Frame.Heading), si = MathF.Sin(f.Frame.Heading);
+        dx = lx * co + lz * si; dz = -lx * si + lz * co;
 
         var pm = new ParticleProcessMaterial
         {
@@ -48,7 +52,7 @@ public static class RockSplash
             Lifetime = 0.55f + 0.15f * speed,
             ProcessMaterial = pm,
             DrawPass1 = new QuadMesh { Size = new Vector2(0.09f, 0.09f), Material = DrawMaterial() },
-            Position = new Vector3(r.X - dx * r.Radius * 0.8f, eta + 0.05f, r.Z - dz * r.Radius * 0.8f),
+            Position = new Vector3(r.X - lx * r.Radius * 0.8f, eta + 0.05f, r.Z - lz * r.Radius * 0.8f),
             VisibilityAabb = new Aabb(new Vector3(-4, -2, -4), new Vector3(8, 5, 8)),
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
             Randomness = 0.5f,

@@ -264,7 +264,7 @@ public static class FlowSolver
 
     static void Apply(int n, double[] diag, int[] nb, double[] w, double[] v, double[] outv)
     {
-        System.Threading.Tasks.Parallel.For(0, (n + 4095) / 4096, block =>
+        Par.For(0, (n + 4095) / 4096, block =>
         {
             int end = Math.Min(n, (block + 1) * 4096);
             for (int u = block * 4096; u < end; u++)

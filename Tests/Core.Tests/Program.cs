@@ -270,6 +270,29 @@ Console.WriteLine("Segments:");
     var alone = ReachGenerator.Generate(CourseSegments.Spec(new Course(new CourseSettings()), 2));
     Check(Fingerprint.Of(alone) == Fingerprint.Of(seg2), "a segment generated alone is identical (no chain between segments)");
 
+    // Baked seams: segments 2 and 3, each baked with the blend, show the same surface along their shared cut line
+    // (that is where the shaders split them pixel-exactly).
+    {
+        world.TryGet(3, out var seg3);
+        var b2 = SegmentBake.Bake(seg2, 2, world);
+        var b3 = SegmentBake.Bake(seg3, 3, world);
+        double cut = course.Cuts[3];
+        var (vx, vz) = course.ValleyPoint(cut);
+        float hc = course.ValleyHeadingAt(cut);
+        float worstH = 0f, worstE = 0f;
+        for (double t = -550; t <= 550; t += 1.0)
+        {
+            double px = vx + MathF.Cos(hc) * t, pz = vz - MathF.Sin(hc) * t;
+            var (l2x, l2z) = b2.Frame.ToLocal(px, pz); var (l3x, l3z) = b3.Frame.ToLocal(px, pz);
+            if (!b2.InDomain(l2x, l2z) || !b3.InDomain(l3x, l3z)) continue;
+            worstH = MathF.Max(worstH, MathF.Abs(b2.SampleHeight(l2x, l2z) - b3.SampleHeight(l3x, l3z)));
+            if (b2.SampleDepth(l2x, l2z) > 0.3f && b3.SampleDepth(l3x, l3z) > 0.3f)
+                worstE = MathF.Max(worstE, MathF.Abs(b2.SampleEta(l2x, l2z) - b3.SampleEta(l3x, l3z)));
+        }
+        Console.WriteLine($"  baked seams, along the cut line: terrain within {worstH * 100:F1} cm, water level within {worstE * 100:F1} cm");
+        Check(worstH < 0.15f && worstE < 0.01f, "baked neighbours meet at the cut line (where the shaders split them)");
+    }
+
     if (worldPath != null) { WorldMap.Write(world, new[] { 1, 2, 3, 4 }, 4.0, worldPath); Console.WriteLine($"  world map: {worldPath}"); }
 }
 

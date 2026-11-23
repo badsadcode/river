@@ -14,14 +14,14 @@ public static class TerrainBuilder
     const int ChunkCells = 64;          // 128 m chunks at 2 m
     const float LodSwitch = 650f;       // m: full detail inside, quarter detail outside
 
-    public static Node3D Build(ReachField f, FieldTextures tex)
+    public static Node3D Build(ReachField f, FieldTextures tex) => Build(f, tex, true, out _);
+
+    /// <summary>Terrain in the field's grid coordinates. <paramref name="farLand"/>: the prototype's horizon ring around
+    /// its single grid (segments get theirs from the course). <paramref name="mat"/>: the material (for clipping).</summary>
+    public static Node3D Build(ReachField f, FieldTextures tex, bool farLand, out ShaderMaterial mat)
     {
         var root = new Node3D { Name = "Terrain" };
-        var shader = GD.Load<Shader>("res://Game/Shaders/Terrain.gdshader");
-        var mat = new ShaderMaterial { Shader = shader };
-        tex.Apply(mat);
-        mat.SetShaderParameter("far_eta_a", f.EtaTrendA);
-        mat.SetShaderParameter("far_eta_b", f.EtaTrendB);
+        mat = CreateMaterial(f, tex);
 
         // Normals from the whole field (seamless across chunks).
         var normals = ComputeNormals(f);
@@ -31,29 +31,91 @@ public static class TerrainBuilder
             {
                 int w = Math.Min(ChunkCells, f.Nx - 1 - cx), h = Math.Min(ChunkCells, f.Nz - 1 - cz);
                 var centre = new Vector3((cx + w * 0.5f) * f.Cell, 0, (cz + h * 0.5f) * f.Cell);
+                // The two levels overlap by 40 m: the margins act as hysteresis, and with touching ranges a chunk added
+                // near the switch distance could come up with neither level visible (a hole to the sky).
                 var near = new MeshInstance3D
                 {
                     Name = $"T{cx}_{cz}", Mesh = ChunkMesh(f, normals, cx, cz, w, h, 1), MaterialOverride = mat,
-                    VisibilityRangeEnd = LodSwitch, VisibilityRangeEndMargin = 20f,
+                    VisibilityRangeEnd = LodSwitch + 30f, VisibilityRangeEndMargin = 10f,
                 };
                 var far = new MeshInstance3D
                 {
                     Name = $"T{cx}_{cz}_far", Mesh = ChunkMesh(f, normals, cx, cz, w, h, 4), MaterialOverride = mat,
-                    VisibilityRangeBegin = LodSwitch, VisibilityRangeBeginMargin = 20f,
+                    VisibilityRangeBegin = LodSwitch - 30f, VisibilityRangeBeginMargin = 10f,
                 };
                 root.AddChild(near);
                 root.AddChild(far);
             }
 
-        root.AddChild(BuildCollision(f));
-        root.AddChild(BuildFarLand(f, mat));
+        // Collision in chunks: one heightmap of a whole segment (~1 M samples) took the physics engine 1.4 s to take in
+        // on the main thread; 128 m chunks are attached one by one by the streamer, within its frame budget.
+        for (int cz = 0; cz < f.Nz - 1; cz += ChunkCells)
+            for (int cx = 0; cx < f.Nx - 1; cx += ChunkCells)
+                root.AddChild(CollisionChunk(f, cx, cz, Math.Min(ChunkCells, f.Nx - 1 - cx), Math.Min(ChunkCells, f.Nz - 1 - cz)));
+        if (farLand) root.AddChild(BuildFarLand(f, mat));
         return root;
+    }
+
+    static StaticBody3D CollisionChunk(ReachField f, int cx, int cz, int w, int h)
+    {
+        // HeightMapShape3D samples are 1 unit apart and centred on the shape: scale by the cell size, centre on the chunk.
+        var data = new float[(w + 1) * (h + 1)];
+        for (int z = 0; z <= h; z++)
+            for (int x = 0; x <= w; x++)
+                data[z * (w + 1) + x] = f.Height[(cz + z) * f.Nx + cx + x] / f.Cell;
+        var body = new StaticBody3D { Name = $"TC{cx}_{cz}", CollisionLayer = 1, CollisionMask = 0 };
+        body.PhysicsMaterialOverride = new PhysicsMaterial { Friction = 0.6f };
+        body.AddChild(new CollisionShape3D
+        {
+            Shape = new HeightMapShape3D { MapWidth = w + 1, MapDepth = h + 1, MapData = data },
+            Scale = Vector3.One * f.Cell,
+            Position = new Vector3((cx + w * 0.5f) * f.Cell, 0, (cz + h * 0.5f) * f.Cell),
+        });
+        return body;
+    }
+
+    public static ShaderMaterial CreateMaterial(ReachField f, FieldTextures tex)
+    {
+        var mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://Game/Shaders/Terrain.gdshader") };
+        tex.Apply(mat);
+        mat.SetShaderParameter("far_eta_a", f.EtaTrendA);
+        mat.SetShaderParameter("far_eta_b", f.EtaTrendB);
+        return mat;
+    }
+
+    /// <summary>A mesh from a regular lattice of heights (row-major, vx × vz), with smooth normals. For far land.</summary>
+    public static ArrayMesh LatticeMesh(Vector3[] verts, int vx, int vz, Func<int, int, bool> skipQuad)
+    {
+        var idx = new System.Collections.Generic.List<int>();
+        for (int z = 0; z < vz - 1; z++)
+            for (int x = 0; x < vx - 1; x++)
+            {
+                if (skipQuad(x, z)) continue;
+                int a = z * vx + x, b = a + 1, c = a + vx, d = c + 1;
+                idx.Add(a); idx.Add(b); idx.Add(d); idx.Add(a); idx.Add(d); idx.Add(c);
+            }
+        var norms = new Vector3[verts.Length];
+        for (int z = 0; z < vz; z++)
+            for (int x = 0; x < vx; x++)
+            {
+                var l = verts[z * vx + Math.Max(0, x - 1)]; var r = verts[z * vx + Math.Min(vx - 1, x + 1)];
+                var d = verts[Math.Max(0, z - 1) * vx + x]; var u = verts[Math.Min(vz - 1, z + 1) * vx + x];
+                norms[z * vx + x] = (u - d).Cross(r - l).Normalized();
+            }
+        var arrays = new Godot.Collections.Array();
+        arrays.Resize((int)Mesh.ArrayType.Max);
+        arrays[(int)Mesh.ArrayType.Vertex] = verts;
+        arrays[(int)Mesh.ArrayType.Normal] = norms;
+        arrays[(int)Mesh.ArrayType.Index] = idx.ToArray();
+        var mesh = new ArrayMesh();
+        if (idx.Count > 0) mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+        return mesh;
     }
 
     static Vector3[] ComputeNormals(ReachField f)
     {
         var n = new Vector3[f.Nx * f.Nz];
-        System.Threading.Tasks.Parallel.For(0, f.Nz, z =>
+        River.Core.Par.For(0, f.Nz, z =>
         {
             for (int x = 0; x < f.Nx; x++)
             {
@@ -118,21 +180,6 @@ public static class TerrainBuilder
         mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
         // Godot culls by winding; make sure faces point up (counter-clockwise seen from above in Godot = clockwise in x/z).
         return mesh;
-    }
-
-    static StaticBody3D BuildCollision(ReachField f)
-    {
-        // HeightMapShape3D samples are 1 unit apart: scale the shape node uniformly by the cell size.
-        var data = new float[f.Nx * f.Nz];
-        for (int i = 0; i < data.Length; i++) data[i] = f.Height[i] / f.Cell;
-        var shape = new HeightMapShape3D { MapWidth = f.Nx, MapDepth = f.Nz, MapData = data };
-        var body = new StaticBody3D { Name = "TerrainCollision", CollisionLayer = 1, CollisionMask = 0 };
-        body.PhysicsMaterialOverride = new PhysicsMaterial { Friction = 0.6f };
-        var cs = new CollisionShape3D { Shape = shape };
-        cs.Scale = Vector3.One * f.Cell;
-        cs.Position = new Vector3(f.SizeX * 0.5f, 0, f.SizeZ * 0.5f);
-        body.AddChild(cs);
-        return body;
     }
 
     /// <summary>Height of the land outside the grid: floodplain + valley relief, the river continuing in a trench.</summary>

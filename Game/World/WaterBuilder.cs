@@ -14,18 +14,25 @@ public static class WaterBuilder
 {
     const int ChunkCells = 64;
 
+    // The procedural textures are the same for every segment: generated once.
+    static readonly Lazy<ImageTexture> RippleLarge = new(() => ProceduralTextures.WaterNormals(512, 11, 4, 7f));
+    static readonly Lazy<ImageTexture> RippleSmall = new(() => ProceduralTextures.WaterNormals(512, 23, 8, 10f));
+    static readonly Lazy<ImageTexture> FoamTex = new(() => ProceduralTextures.Foam(512, 37));
+
     public static ShaderMaterial CreateMaterial(FieldTextures tex)
     {
         var mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://Game/Shaders/River.gdshader") };
         tex.Apply(mat);
-        mat.SetShaderParameter("ripple_large", ProceduralTextures.WaterNormals(512, 11, 4, 7f));
-        mat.SetShaderParameter("ripple_small", ProceduralTextures.WaterNormals(512, 23, 8, 10f));
-        mat.SetShaderParameter("foam_tex", ProceduralTextures.Foam(512, 37));
+        mat.SetShaderParameter("ripple_large", RippleLarge.Value);
+        mat.SetShaderParameter("ripple_small", RippleSmall.Value);
+        mat.SetShaderParameter("foam_tex", FoamTex.Value);
         mat.RenderPriority = 1;
         return mat;
     }
 
-    public static Node3D Build(ReachField f, ShaderMaterial mat)
+    /// <summary>Water meshes in the field's grid coordinates (the caller places the node by the field's frame).
+    /// <paramref name="farStrips"/>: the prototype's flat strips continuing the river beyond its single grid.</summary>
+    public static Node3D Build(ReachField f, ShaderMaterial mat, bool farStrips = true)
     {
         var root = new Node3D { Name = "Water" };
         // Rocks for the shader's pillows and hollows (mirror of SurfaceWaves.RockBump), at most 64.
@@ -51,7 +58,7 @@ public static class WaterBuilder
                     CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
                 });
             }
-        root.AddChild(FarStrips(f, mat));
+        if (farStrips) root.AddChild(FarStrips(f, mat));
         return root;
     }
 

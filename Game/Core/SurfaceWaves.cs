@@ -104,6 +104,16 @@ public static class SurfaceWaves
         return hv * deep * (emerg * (pillow - 0.35f * sides - 0.55f * hollow) + (1f - emerg) * (0.6f * hump - 0.4f * hollow));
     }
 
+    /// <summary>Everything above the solved level at a world point of the endless river (what the raft floats on).</summary>
+    public static float Total(RiverWorld w, float x, float z, float t)
+    {
+        var s = w.At(x, z);
+        float h = Height(x, z, t, s.VelX, s.VelZ, s.Depth, s.Eddy);
+        var rocks = w.Rocks;
+        for (int i = 0; i < rocks.Count; i++) h += RockBump(x, z, rocks[i]);   // indexed: no boxed enumerator per call
+        return h;
+    }
+
     /// <summary>Everything above the solved level at (x, z): waves plus rock bumps (what the raft floats on).</summary>
     public static float Total(ReachField f, float x, float z, float t)
     {
