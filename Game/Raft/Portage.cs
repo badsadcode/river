@@ -21,7 +21,7 @@ namespace River.Raft;
 /// </summary>
 public partial class Portage : Node3D
 {
-    public const float PushSpeed = 0.75f;      // m/s along the trail while pushed
+    public const float PushSpeed = 1.0f;       // m/s along the trail while pushed (a 240 m trail: ~4 minutes)
     const float RollerLift = 0.55f;            // raft hull centre above the trail on its rollers
 
     Raft _raft;
@@ -36,6 +36,8 @@ public partial class Portage : Node3D
     ColorRect _fade;
     bool _fPressed, _busy;
     string _message; double _messageUntil;
+    WorldFalls _above; double _aboveAt;         // the waterfall the raft was last seen above, and when
+    float _pinned;                              // seconds the raft has been stuck right at a lip
 
     /// <summary>What the HUD shows the player right now (null: nothing).</summary>
     public string Prompt { get; private set; }
@@ -87,9 +89,19 @@ public partial class Portage : Node3D
         var (rwx, rwz) = Origin.ToWorld(rp);
         foreach (var fa in _world.Falls)
         {
-            // Over the edge?
+            // Over the edge? Only by crossing the lip from above (a raft relaunched below the falls is fine).
             var (along, across) = fa.Relative(rwx, rwz);
-            if (along > 3.0 && along < 80.0 && Math.Abs(across) < fa.HalfWidth + 15.0 && rp.Y < fa.TopEta - 2f) { Wreck(fa); return; }
+            double now = Time.GetTicksMsec() / 1000.0;
+            if (along < 0.0 && along > -300.0 && Math.Abs(across) < fa.HalfWidth + 15.0) { _above = fa; _aboveAt = now; }
+            if (_above == fa && now - _aboveAt < 30.0 && along > 3.0 && along < 80.0 && Math.Abs(across) < fa.HalfWidth + 15.0
+                && rp.Y < fa.TopEta - 2f) { _above = null; _pinned = 0f; Wreck(fa); return; }
+            // Pinned against the lip boulders at the very edge: the river drags it over in the end.
+            if (along > -8.0 && along < 3.0 && Math.Abs(across) < fa.HalfWidth + 15.0 && _raft.LinearVelocity.Length() < 0.3f)
+            {
+                _pinned += dt;
+                if (_pinned > 6f) { _above = null; _pinned = 0f; Wreck(fa); return; }
+            }
+            else if (along < -8.0 && along > -300.0 && Math.Abs(across) < fa.HalfWidth + 15.0) _pinned = 0f;
 
             var head = Origin.ToScene(fa.TrailX[0], fa.TrailH[0], fa.TrailZ[0]);
             var landing = Origin.ToScene(fa.LandingX, fa.TopEta, fa.LandingZ);
@@ -191,6 +203,7 @@ public partial class Portage : Node3D
             PutAfloat(Origin.ToScene(fa.PutInX, fa.BottomEta + 0.1f, fa.PutInZ), fa);
             _rollers.Visible = false;
             _falls = null;
+            _above = null;
             Say("The raft is afloat again below the falls.", 5);
             Relaunches++;
             GD.Print($"PORTAGE: raft afloat below the falls (segment {fa.Segment})");

@@ -251,3 +251,35 @@ Still to do (tier 3): rapids and a waterfall with portage, island labyrinths, re
 - Checks: drift test with a forced shift every 30 s — water height at a fixed world point jumps 0.00 mm, the raft
   drifts on smoothly (8 min in the first gorge, 28 km out); a capture before and after a 360 m shift matches.
   Pseudo-shot `shift` for that comparison.
+
+## D21 — Waterfalls and portage
+Tom's choices: portage by **hauling the raft on log rollers**; a raft that goes over is **wrecked** (for now rebuilt
+at the landing, since there is no survival yet).
+- **Course**: `FeatureKind.Falls`, on its own sparse schedule (first at 14 ± 3 km, then every 35 ± 10 km;
+  `CourseSettings.FallsFirstKm/FallsSpacingKm`). 450 m: a wide, deep, slow pool 280 m above the lip with a slack bay
+  on the landing side, the lip (the course's level drops by the falls' height, 6–14 m, in one step), a deep plunge
+  pool 170 m below. Meanders damped through it.
+- **Segment** (`CourseSegments.MakeFalls`, `FallsSpec`): lip centre and flow direction, landing (in the bay, 110 m
+  above), put-in (75 m below), a trail polyline (bank → 28 m inland → downstream past the lip → back to the water) and
+  3–6 boulders on the lip that split the curtain.
+- **Generator**: the drop can't be solved for (it isn't friction), so the flow is solved with the outlet held its
+  height higher and the water below the lip (by the nearest main centre-line sample) is then lowered by it; the
+  course's level already has the step, so the valley gets a scarp across it. The plunge pool's first 24 m are foam
+  sources. The trail is carved 4 m wide, level at both ends and ramped over 70 m around the lip (≤ 13 % on the first
+  falls). `RiverWorld.Falls` lists loaded falls in world coordinates.
+- **Look** (`FallsBuilder`, `Falls.gdshader`): the water surface stops at the lip (cells across a > 1 m step aren't
+  drawn); a curtain mesh falls along a parabola, split at the lip boulders, glassy at the top and white below with
+  streaks racing down; spray and a mist cloud at the foot; very foamy water reads white even when slow; a post at the
+  trail head.
+- **Portage** (`Raft/Portage.cs`): ashore by the post with the raft in the bay, F hauls it out onto rollers (fade);
+  walking into it from behind pushes it along the trail at 1 m/s (≈ 4 min for 240 m); at the end it is put afloat
+  below the falls. **Wreck**: crossing the lip from above and dropping 2 m → fade, raft rebuilt and anchored at the
+  landing, the player put ashore by the post if not aboard; a raft pinned against the lip boulders within 8 m of the
+  edge for 6 s is dragged over (a lip-pinned raft would otherwise be stuck there). HUD prompts warn of falls ahead
+  and say what to do.
+- Checks: headless test of the first falls (drop = height, landing current 0.16 m/s, trail ≤ 13 %, carved to within
+  5 cm, water balanced); `--portage-test` (with `--start=falls`): drift over → wrecked and rebuilt 0.1 m from the
+  landing; haul and push → afloat 0.3 m from the put-in after 233 s. Shots `falls`, `falls_top`, `portage`.
+- Fixed on the way: the raft's anchor point now moves with floating-origin shifts.
+- Not yet: lining the raft down with ropes, sound, a proper waterfall pool as a "secret place", tuning the look
+  (whiter churn at the foot; the lip boulders sit a bit like eggs).

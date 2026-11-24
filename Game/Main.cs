@@ -441,12 +441,27 @@ public partial class Main : Node3D
             case "falls_top":
             {
                 if (FindFeature(FeatureKind.Falls) is not { } f) break;
-                var lip = At(f.Lip); var below = At(f.Lip + 70.0);
+                var lip = At(f.Lip); var below = At(f.Lip + 38.0);
                 if (name == "falls")
                     // From the plunge pool, looking back up at the curtain.
-                    FlyCam.LookAtPoint(OnWater(below.x - below.rx * 0.25f * below.hr, below.z - below.rz * 0.25f * below.hr, 3f), OnWater(lip.x, lip.z, -2f));
+                    FlyCam.LookAtPoint(OnWater(below.x - below.rx * 0.25f * below.hr, below.z - below.rz * 0.25f * below.hr, 5f), OnWater(lip.x, lip.z, -3f));
                 else
                     FlyCam.LookAtPoint(OnWater(lip.x - lip.tx * 160.0 + lip.rx * 110.0, lip.z - lip.tz * 160.0 + lip.rz * 110.0, 80f), OnWater(lip.x, lip.z, -3f));
+                break;
+            }
+            case "portage":
+            {
+                // The raft hauled out at the trail head, on its rollers, seen from the bank above.
+                if (FindFeature(FeatureKind.Falls) is null || World.Falls.Count == 0) break;
+                var fa = World.Falls[0];
+                Portage.BeginForTest(fa);
+                // Where the raft will sit: 4 m along the trail from its head.
+                var p0 = Origin.ToScene(fa.TrailX[0], fa.TrailH[0], fa.TrailZ[0]);
+                var p1 = Origin.ToScene(fa.TrailX[1], fa.TrailH[1], fa.TrailZ[1]);
+                var raftAt = p0 + (p1 - p0).Normalized() * 4f;
+                var along = (p1 - p0) with { Y = 0 };
+                var across = new Vector3(-along.Z, 0, along.X).Normalized();
+                FlyCam.LookAtPoint(raftAt + across * 8f - along.Normalized() * 5f + Vector3.Up * 4f, raftAt + Vector3.Up * 0.8f);
                 break;
             }
             case "shift":

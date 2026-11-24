@@ -40,18 +40,26 @@ public static class FallsBuilder
         {
             float px = fa.LipX + ax * c - fa.DirX * 1.5f, pz = fa.LipZ + az * c - fa.DirZ * 1.5f;
             if (!f.InDomain(px, pz) || f.SampleDepth(px, pz) < 0.15f) continue;
+            // Boulders on the lip split the sheet.
+            float qx = fa.LipX + ax * c, qz = fa.LipZ + az * c;
+            bool rock = false;
+            foreach (var r in f.Rocks)
+                if ((r.X - qx) * (r.X - qx) + (r.Z - qz) * (r.Z - qz) < (r.Radius * 0.9f) * (r.Radius * 0.9f)) { rock = true; break; }
+            if (rock) continue;
             cols.Add(c);
         }
         int prev = -1; float prevC = float.NaN;
         foreach (float c in cols)
         {
             int start = verts.Count;
+            // Each part of the sheet falls a little differently: more or less water, a ragged lip.
+            float vary = River.Core.Noise.Fbm1(c * 0.21f, f.Seed + 77, 2);
+            float th = throwDist * (1f + 0.35f * vary), lipOff = 0.25f * River.Core.Noise.Fbm1(c * 0.6f, f.Seed + 78, 2);
             for (int r = 0; r <= rows; r++)
             {
                 float u = r / (float)rows;
-                float fwd = 1.0f + throwDist * MathF.Sqrt(u);
+                float fwd = 1.0f + lipOff + th * MathF.Sqrt(u);
                 float y = fa.TopEta + 0.04f - (drop + 0.35f) * u;
-                // A little sag at the edges of the sheet, where it is thinner.
                 verts.Add(new Vector3(fa.LipX + ax * c + fa.DirX * fwd, y, fa.LipZ + az * c + fa.DirZ * fwd));
                 uvs.Add(new Vector2(c, u));
             }
@@ -105,7 +113,7 @@ public static class FallsBuilder
                 {
                     Offsets = new[] { 0f, 0.2f, 1f },
                     Colors = mist
-                        ? new[] { new Color(1, 1, 1, 0f), new Color(1, 1, 1, 0.22f), new Color(1, 1, 1, 0f) }
+                        ? new[] { new Color(1, 1, 1, 0f), new Color(1, 1, 1, 0.3f), new Color(1, 1, 1, 0f) }
                         : new[] { new Color(1, 1, 1, 0f), new Color(1, 1, 1, 0.8f), new Color(1, 1, 1, 0f) },
                 },
             },
@@ -115,10 +123,10 @@ public static class FallsBuilder
         return new GpuParticles3D
         {
             Name = mist ? "FallsMist" : "FallsSpray",
-            Amount = mist ? 70 : 260,
+            Amount = mist ? 140 : 320,
             Lifetime = mist ? 5f : 1.4f,
             ProcessMaterial = pm,
-            DrawPass1 = new QuadMesh { Size = mist ? new Vector2(3.5f, 3.5f) : new Vector2(0.25f, 0.25f), Material = SprayMaterial() },
+            DrawPass1 = new QuadMesh { Size = mist ? new Vector2(6f, 6f) : new Vector2(0.35f, 0.35f), Material = SprayMaterial() },
             Position = new Vector3(fa.LipX + fa.DirX * 3.5f, fa.BottomEta + 0.2f, fa.LipZ + fa.DirZ * 3.5f),
             Rotation = new Vector3(0f, yaw, 0f),
             VisibilityAabb = new Aabb(new Vector3(-60, -5, -60), new Vector3(120, 40, 120)),

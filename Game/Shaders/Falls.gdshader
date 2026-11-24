@@ -32,7 +32,8 @@ void fragment() {
 	vec2 p2 = vec2(across * 3.7 + 7.0, down * drop * 0.8 - TIME * fall_speed * 0.8);
 	float streak = vnoise(p1) * 0.6 + vnoise(p2) * 0.4;
 	// Aeration: glassy at the lip, white lower down, whitest in clumps.
-	float white = clamp(smoothstep(0.02, 0.45, down) * (0.55 + 0.6 * streak) + 0.15 * streak, 0.0, 1.0);
+	float across_var = vnoise(vec2(across * 0.35, 3.0));
+	float white = clamp(smoothstep(0.08 + 0.2 * across_var, 0.6, down) * (0.5 + 0.65 * streak) + 0.1 * streak, 0.0, 1.0);
 	ALBEDO = mix(deep_color, white_color, white);
 	ROUGHNESS = mix(0.08, 0.7, white);
 	SPECULAR = 0.5;

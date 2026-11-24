@@ -250,6 +250,10 @@ Console.WriteLine("Segments:");
                     worstGround = MathF.Max(worstGround, MathF.Abs(ff.SampleHeight(fa.TrailX[j], fa.TrailZ[j]) - fa.TrailH[j]));
                 Console.WriteLine($"  waterfall at σ {falls.Lip:F0} m (segment {k}): {fa.Height:F1} m high, levels {fa.TopEta:F2} / {fa.BottomEta:F2}, " +
                                   $"landing current {landingSpeed:F2} m/s, trail {trailLen:F0} m, steepest {steepest * 100:F0} %, ground off the trail by ≤ {worstGround:F2} m");
+                float plungeFoam = 0f;
+                for (float d = 3f; d < 30f; d += 1f)
+                    plungeFoam = MathF.Max(plungeFoam, ff.Sample(ff.Foam, fa.LipX + fa.DirX * d, fa.LipZ + fa.DirZ * d));
+                Console.WriteLine($"  plunge pool foam up to {plungeFoam:F2} within 30 m of the lip");
                 Check(MathF.Abs(drop - fa.Height) < 0.8f, "the water drops by the waterfall's height at its lip");
                 Check(landingSpeed < 0.6f, "the landing above the falls is slack enough to pull in");
                 Check(steepest < 0.3f && worstGround < 0.5f, "the portage trail is cut into the ground and gentle enough to push a raft along");

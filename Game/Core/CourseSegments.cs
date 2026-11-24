@@ -97,7 +97,7 @@ public static class CourseSegments
                 case FeatureKind.Split: spec.Islands.Add(MakeIsland(c, c.RiverIndexAt(f.Mid), 0f, 55f, 100f, 13f, 2.6f, 0.2f, f.Seed, L, LDir)); break;
                 case FeatureKind.Riffle: RiffleRocks(c, f, spec, L); break;
                 case FeatureKind.Rapid: RapidRocks(c, f, spec, L); break;
-                case FeatureKind.Falls: spec.Falls = MakeFalls(c, f, L, LDir); break;
+                case FeatureKind.Falls: spec.Falls = MakeFalls(c, f, L, LDir); LipRocks(c, f, spec, L); break;
                 case FeatureKind.Confluence:
                     var (trib, edge, q) = Tributary(c, f, frame, sizeX, sizeZ, L);
                     if (trib != null) { spec.Tributary = trib; inflows.Add(new Inflow(edge, 1, q)); }
@@ -332,6 +332,22 @@ public static class CourseSegments
     }
 
     // ================================================================ waterfalls (docs/DECISIONS.md D21)
+
+    /// <summary>3–6 boulders standing out of the water just above a waterfall's lip: they split the curtain.</summary>
+    static void LipRocks(Course c, CourseFeature f, SegmentSpec spec, Func<double, double, (float, float)> L)
+    {
+        var rng = new Rng(f.Seed + 31);
+        int i = c.RiverIndexAt(f.Lip - 1.5);
+        float hl = c.HalfLeft[i], hr = c.HalfRight[i];
+        int n = 3 + rng.Range(0, 4);
+        var (rx, rz) = c.RiverRight(i);
+        for (int q = 0; q < n; q++)
+        {
+            float lat = -hl * 0.85f + (hl + hr) * 0.85f * (q + rng.Range(0.2f, 0.8f)) / n;
+            var (lx, lz) = L(c.X[i] + rx * lat, c.Z[i] + rz * lat);
+            spec.Rocks.Add(new Rock { X = lx, Z = lz, Radius = rng.Range(1.0f, 2.4f), Top = rng.Range(0.3f, 1.2f), Seed = f.Seed + 300 + q });
+        }
+    }
 
     static bool FallsNear(Course c, int i)
     {
