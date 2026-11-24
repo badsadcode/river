@@ -97,7 +97,8 @@ public static class CourseSegments
                 case FeatureKind.Split: spec.Islands.Add(MakeIsland(c, c.RiverIndexAt(f.Mid), 0f, 55f, 100f, 13f, 2.6f, 0.2f, f.Seed, L, LDir)); break;
                 case FeatureKind.Riffle: RiffleRocks(c, f, spec, L); break;
                 case FeatureKind.Rapid: RapidRocks(c, f, spec, L); break;
-                case FeatureKind.Falls: spec.Falls = MakeFalls(c, f, L, LDir); LipRocks(c, f, spec, L); break;
+                // (No rock ledges on the lip: the gaps they left in the sheet showed as dark wedges, and they read as logs.)
+                case FeatureKind.Falls: spec.Falls = MakeFalls(c, f, L, LDir); break;
                 case FeatureKind.Confluence:
                     var (trib, edge, q) = Tributary(c, f, frame, sizeX, sizeZ, L);
                     if (trib != null) { spec.Tributary = trib; inflows.Add(new Inflow(edge, 1, q)); }

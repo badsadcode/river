@@ -6,7 +6,7 @@
 //   mode 1, the veil: thin white spray just in front of the sheet, lower down.
 //   mode 2, the churn: UV.y = 0 where the water lands → 1 nine metres out. A white boil that heaves, spreads and thins.
 shader_type spatial;
-render_mode cull_disabled, depth_draw_opaque, specular_schlick_ggx;
+render_mode cull_disabled, depth_draw_opaque, specular_schlick_ggx, shadows_disabled;   // aerated falling water holds no crisp shadow
 
 // Floating origin (World/Origin.cs): scene position + world_origin = world position.
 global uniform vec3 world_origin;
@@ -67,6 +67,11 @@ void fragment() {
 		float fine = fbm(vec2(across * 3.8 + seed * 13.0, y2));
 		// Hair-fine streaks (a few cm across), racing faster: what the eye reads as falling water up close.
 		float hair = vnoise(vec2(across * 11.0 + seed * 31.0, sqrt(s + 0.4) * 9.0 - TIME * 9.0));
+		// Seen edge-on or from afar the finest detail would alias into blocks: fade it to its mean there.
+		float fw_h = fwidth(across * 11.0) + fwidth(sqrt(s + 0.4) * 9.0);
+		float fw_f = fwidth(across * 3.8) + fwidth(sqrt(s + 0.4) * 4.6);
+		hair = mix(hair, 0.5, smoothstep(0.25, 0.8, fw_h));
+		fine = mix(fine, 0.5, smoothstep(0.25, 0.8, fw_f));
 		float streak = big * 0.45 + fine * 0.35 + hair * 0.2;
 		// Glassy tongue: full columns stay smooth further down.
 		float glass = 1.0 - smoothstep(0.03, 0.12 + 0.22 * amount, down);
@@ -80,6 +85,8 @@ void fragment() {
 			ALPHA = clamp(smoothstep(0.25, 0.8, down) * smoothstep(0.4, 0.75, fine) * 0.35 * (0.5 + amount), 0.0, 0.5);
 		} else {
 			ALBEDO = mix(glass_color, white_color, white);
+			// Broad light and dark bands that survive at a distance (where the fine streaks fade out).
+			ALBEDO *= 0.78 + 0.3 * big;
 			// Highlights sliding over the glassy tongue.
 			ROUGHNESS = mix(0.04, 0.65, white);
 			SPECULAR = mix(0.7, 0.35, white);

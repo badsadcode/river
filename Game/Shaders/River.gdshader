@@ -19,6 +19,11 @@ uniform sampler2D depth_tex : hint_depth_texture, filter_nearest, repeat_disable
 // Reach field
 uniform sampler2D flow_tex : filter_linear, repeat_disable;   // vel x, vel z, depth, foam
 uniform sampler2D shape_tex : filter_linear, repeat_disable;  // eta, shore distance, terrain height
+// A waterfall in this segment (WaterBuilder): distance past the lip's smooth curve per grid node; the upper surface
+// is clipped there (its cells over the edge are drawn at both levels; lip_mid tells the copies apart).
+uniform sampler2D lip_tex : filter_linear, repeat_disable;
+uniform float has_lip = 0.0;
+uniform float lip_mid = 0.0;
 uniform vec2 field_size = vec2(601.0, 1601.0);
 uniform float field_cell = 2.0;
 
@@ -240,6 +245,7 @@ void fragment() {
 	// Only this segment's side of the cut lines (the neighbour draws the rest).
 	if (clip_a_on > 0.5 && dot(v_world.xz - clip_a.xy, clip_a.zw) < 0.0) discard;
 	if (clip_b_on > 0.5 && dot(v_world.xz - clip_b.xy, clip_b.zw) >= 0.0) discard;
+	if (has_lip > 0.5 && v_world.y > lip_mid && texture(lip_tex, field_uv(v_local)).r > 0.0) discard;
 	float t = TIME + time_offset;
 	vec2 xz = v_world.xz;          // patterns: world
 	vec2 q = v_local;              // field lookups: this segment's grid

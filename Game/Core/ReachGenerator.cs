@@ -285,6 +285,16 @@ public static class ReachGenerator
             fallsFoam = new float[total];
             int below = 0;
             float hwLip = falls.HalfWidth;
+            // Every node's distance past the lip's smooth curve (straight lines from the lip centre along and across the
+            // flow; the river runs straight there): the water surface is clipped to it and the sheet starts on it,
+            // so neither shows the 2 m grid.
+            f.LipDist = new float[total];
+            for (int i = 0; i < total; i++)
+            {
+                float x = (i % nx) * s.Cell - falls.LipX, z = (i / nx) * s.Cell - falls.LipZ;
+                float along = x * falls.DirX + z * falls.DirZ, acr = -x * falls.DirZ + z * falls.DirX;
+                f.LipDist[i] = along - FallsSpec.LipAt(acr, hwLip, falls.Height, s.Seed);
+            }
             for (int i = 0; i < total; i++)
             {
                 if (!connected[i]) continue;
@@ -302,6 +312,10 @@ public static class ReachGenerator
                     across = -(x - falls.LipX) * falls.DirZ + (z - falls.LipZ) * falls.DirX;
                 }
                 float lipAt = FallsSpec.LipAt(across, hwLip, falls.Height, s.Seed);
+                // Near the lip, which side a node is on comes from the same smooth curve the water surface is clipped to
+                // and the sheet starts on (straight-line geometry): otherwise a node just past the sheet could keep the
+                // upper level and stand in the pool as a pillar of riverbed.
+                if (MathF.Abs(f.LipDist[i]) < 40f) { past = f.LipDist[i]; lipAt = 0f; }
                 if (past <= lipAt)
                 {
                     // The approach: over the last 30 m the water speeds up towards the edge (up to ×3 at the brink),

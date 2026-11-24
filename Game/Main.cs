@@ -445,6 +445,24 @@ public partial class Main : Node3D
                 FlyCam.LookAtPoint(OnWater(up.x + up.rx * 6.0, up.z + up.rz * 6.0, 4.5f), OnWater(down.x, down.z, -1f));
                 break;
             }
+            case "falls_side":
+            {
+                // From the bank beside the falls, above the pool, looking across the face and down (Tom's view).
+                if (FindFeature(FeatureKind.Falls) is not { } f) break;
+                var l = At(f.Lip + 4.0); var pool = At(f.Lip + 18.0);
+                double side = f.Side > 0 ? -1.0 : 1.0;   // the bank opposite the trail
+                float hw = side > 0 ? l.hr : l.hl;
+                FlyCam.LookAtPoint(OnWater(l.x + l.rx * side * (hw + 8.0), l.z + l.rz * side * (hw + 8.0), 14f), OnWater(pool.x, pool.z, 0f));
+                break;
+            }
+            case "falls_edge":
+            {
+                // On the water a few metres above the edge, looking over it.
+                if (FindFeature(FeatureKind.Falls) is not { } f) break;
+                var u = At(f.Lip - 16.0); var d = At(f.Lip + 6.0);
+                FlyCam.LookAtPoint(OnWater(u.x + u.rx * 0.35f * u.hr, u.z + u.rz * 0.35f * u.hr, 2.2f), OnWater(d.x, d.z, -5f));
+                break;
+            }
             case "falls_close":
             {
                 // In the plunge pool, close in front of the falling water.

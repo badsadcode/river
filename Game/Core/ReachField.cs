@@ -49,6 +49,7 @@ public sealed class ReachField
     public readonly List<Centerline> SideChannels = new();
     public readonly List<Snag> Snags = new();
     public FallsSpec Falls;                     // the segment's waterfall, or null
+    public float[] LipDist;                     // with a waterfall: distance past its lip's smooth curve (m), else null
 
     /// <summary>Linear fit of the water surface along the valley: EtaTrendA + EtaTrendB·z.</summary>
     public float EtaTrendA, EtaTrendB;
@@ -86,6 +87,7 @@ public sealed class ReachField
         c.Height = (float[])Height.Clone(); c.Eta = (float[])Eta.Clone(); c.Depth = (float[])Depth.Clone();
         c.VelX = (float[])VelX.Clone(); c.VelZ = (float[])VelZ.Clone(); c.Foam = (float[])Foam.Clone();
         c.ShoreDist = (float[])ShoreDist.Clone(); c.Eddy = Eddy != null ? (float[])Eddy.Clone() : null;
+        c.LipDist = LipDist != null ? (float[])LipDist.Clone() : null;
         return c;
     }
 

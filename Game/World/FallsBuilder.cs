@@ -31,8 +31,16 @@ public static class FallsBuilder
         }
         root.AddChild(Sheet(cols, fa, veil: false, Mat(0)));
         root.AddChild(Sheet(cols, fa, veil: true, Mat(1)));
-        root.AddChild(Spray(f, fa, mist: false));
-        root.AddChild(Spray(f, fa, mist: true));
+        // Spray and mist rise where the water lands: centred on the foot of the sheet, as wide as the falls.
+        if (cols.Count > 0)
+        {
+            var foot = Vector3.Zero;
+            foreach (var c in cols) foot += c.Lip + c.Dir * Throw(c, drop);
+            foot /= cols.Count;
+            float halfSpan = 0.5f * (cols[^1].Across - cols[0].Across) + 1f;
+            root.AddChild(Spray(f, fa, foot, halfSpan, mist: false));
+            root.AddChild(Spray(f, fa, foot, halfSpan, mist: true));
+        }
         root.AddChild(TrailPost(f, fa));
         root.AddChild(LedgeRocks(f, fa, cols));
         return root;
@@ -98,9 +106,9 @@ public static class FallsBuilder
     }
 
     /// <summary>
-    /// Columns every 0.5 m across the river: for each, march along the flow until the water surface drops (the lip,
-    /// curved and ragged as the generator made it); none where a lip ledge stands or there is no water above. Each
-    /// gets its own amount of water (slow noise across: full sheets here, thin threads there).
+    /// Columns every 0.5 m across the river, on the lip's smooth curve (FallsSpec.LipAt, the same curve the water
+    /// surface is clipped to): wherever there is water just above it and the water below it has dropped; none where a
+    /// lip ledge stands. Each gets its own amount of water (slow noise across: full sheets here, thin threads there).
     /// </summary>
     static List<Column> Columns(ReachField f, FallsSpec fa)
     {
@@ -108,31 +116,13 @@ public static class FallsBuilder
         float ax = -fa.DirZ, az = fa.DirX;
         float drop = fa.TopEta - fa.BottomEta;
         float reach = fa.HalfWidth * 1.6f + 10f;
-        var raw = new List<(float c, float s)>();
         for (float c = -reach; c <= reach; c += 0.5f)
         {
-            float bx = fa.LipX + ax * c, bz = fa.LipZ + az * c;
-            float lipS = float.NaN;
-            for (float t = -18f; t <= 10f; t += 0.25f)
-            {
-                float px = bx + fa.DirX * t, pz = bz + fa.DirZ * t;
-                if (!f.InDomain(px, pz)) break;
-                if (f.SampleEta(px, pz) < fa.TopEta - 0.5f * drop) { lipS = t - 0.25f; break; }
-            }
-            if (float.IsNaN(lipS)) continue;
-            raw.Add((c, lipS));
-        }
-        // Neighbouring columns leave the edge at nearly the same place: smooth the ragged lip over ±1.5 m, or the
-        // strips between them twist into folded ribbons.
-        for (int q = 0; q < raw.Count; q++)
-        {
-            float c = raw[q].c, sum = 0f; int n = 0;
-            for (int o = Math.Max(0, q - 5); o <= Math.Min(raw.Count - 1, q + 5); o++)
-                if (MathF.Abs(raw[o].c - c) < 2.6f) { sum += raw[o].s; n++; }
-            float lipS = sum / n;
-            float bx = fa.LipX + ax * c, bz = fa.LipZ + az * c;
-            float lx = bx + fa.DirX * lipS, lz = bz + fa.DirZ * lipS;
-            if (f.SampleDepth(lx - fa.DirX * 1.5f, lz - fa.DirZ * 1.5f) < 0.15f) continue;
+            float lipS = FallsSpec.LipAt(c, fa.HalfWidth, fa.Height, f.Seed);
+            float lx = fa.LipX + ax * c + fa.DirX * lipS, lz = fa.LipZ + az * c + fa.DirZ * lipS;
+            if (!f.InDomain(lx, lz)) continue;
+            if (f.SampleDepth(lx - fa.DirX * 2.5f, lz - fa.DirZ * 2.5f) < 0.15f) { Dbg(c, "no water above"); continue; }
+            if (f.SampleEta(lx + fa.DirX * 3f, lz + fa.DirZ * 3f) > fa.TopEta - 0.5f * drop) { Dbg(c, $"no drop (eta {f.SampleEta(lx + fa.DirX * 3f, lz + fa.DirZ * 3f):F2})"); continue; }
             bool rock = false;
             foreach (var r in f.Rocks)
                 if ((r.X - lx) * (r.X - lx) + (r.Z - lz) * (r.Z - lz) < (r.Radius * 0.85f) * (r.Radius * 0.85f)) { rock = true; break; }
@@ -140,9 +130,7 @@ public static class FallsBuilder
             float amount = Math.Clamp(0.55f + 0.75f * River.Core.Noise.Fbm1(c / 4.5f, f.Seed + 77, 2), 0.25f, 1f);
             cols.Add(new Column
             {
-                // The top follows the water at the brink (drawn down there), tucked 2 cm under it: no raised band.
-                // (Read 2.5 m upstream and never below the pool above: just at the edge the sample can fall into the
-                // pool below and the strip would start metres too low.)
+                // The top follows the water just above the brink (drawn down there), tucked 2 cm under it.
                 Across = c, Lip = new Vector3(lx, MathF.Max(f.SampleEta(lx - fa.DirX * 2.5f, lz - fa.DirZ * 2.5f), fa.TopEta - 0.4f) - 0.02f, lz),
                 Dir = new Vector3(fa.DirX, 0f, fa.DirZ),
                 Amount = amount, Seed = River.Core.Noise.Hash01((int)MathF.Round(c * 2f), 3, f.Seed + 79),
@@ -151,9 +139,13 @@ public static class FallsBuilder
         return cols;
     }
 
+    static void Dbg(float c, string why) { if (OS.HasEnvironment("RIVER_FALLS_DEBUG")) GD.Print($"FALLS column {c:F1}: {why}"); }
+
     const int Rows = 22;
 
-    static float Throw(in Column col, float drop) => (0.5f + 1.6f * col.Amount) * (1f + 0.08f * drop);
+    // How far out a column lands. At least clear of the rock face, which on the 2 m grid slopes out over a cell below
+    // the lip (thinner columns thrown less would show it through them as dark wedges).
+    static float Throw(in Column col, float drop) => (1.6f + 1.4f * col.Amount) * (1f + 0.08f * drop);
 
     /// <summary>
     /// The falling sheet (or the veil of spray just in front of it). From 0.8 m upstream of the edge the surface curves
@@ -175,8 +167,8 @@ public static class FallsBuilder
             {
                 float u = r / (float)Rows;
                 float brink = MathUtil.Smoothstep(0.12f, 0f, u);
-                // (The brink starts 1.5 m upstream, under the river surface's last cells: no gap between them.)
-                float fwd = -1.5f * brink + th * MathF.Sqrt(u) + out0 * MathUtil.Smoothstep(0.05f, 0.4f, u) * (1f + u);
+                // (The brink starts 0.6 m upstream, just under the river surface, which ends exactly at the lip.)
+                float fwd = -0.6f * brink + th * MathF.Sqrt(u) + out0 * MathUtil.Smoothstep(0.05f, 0.4f, u) * (1f + u);
                 // Slower at first (the water leaves the edge horizontally), then falling.
                 float fall = (col.Lip.Y - fa.BottomEta + 0.4f) * (0.35f * u * u + 0.65f * u);
                 verts.Add(col.Lip + col.Dir * fwd + new Vector3(0f, -fall, 0f));
@@ -248,7 +240,7 @@ public static class FallsBuilder
     }
 
     /// <summary>Spray at the foot of the falls (fast droplets) or the billowing mist cloud above the pool (slow, large).</summary>
-    static GpuParticles3D Spray(ReachField f, FallsSpec fa, bool mist)
+    static GpuParticles3D Spray(ReachField f, FallsSpec fa, Vector3 foot, float halfSpan, bool mist)
     {
         float drop = fa.TopEta - fa.BottomEta;
         float co = MathF.Cos(f.Frame.Heading), si = MathF.Sin(f.Frame.Heading);
@@ -257,7 +249,7 @@ public static class FallsBuilder
         var pm = new ParticleProcessMaterial
         {
             EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Box,
-            EmissionBoxExtents = new Vector3(fa.HalfWidth * 1.1f, 0.3f, mist ? 4f : 2f),
+            EmissionBoxExtents = new Vector3(halfSpan * (mist ? 0.85f : 1f), 0.3f, mist ? 3f : 1.5f),
             Direction = new Vector3(wdx * 0.5f, 1f, wdz * 0.5f).Normalized(),
             Spread = mist ? 50f : 35f,
             InitialVelocityMin = mist ? 0.6f : 2f + 0.25f * drop,
@@ -287,7 +279,7 @@ public static class FallsBuilder
             Lifetime = mist ? 7f : 1.6f,
             ProcessMaterial = pm,
             DrawPass1 = new QuadMesh { Size = mist ? new Vector2(8f, 8f) : new Vector2(0.4f, 0.4f), Material = mist ? MistMaterial() : SprayMaterial() },
-            Position = new Vector3(fa.LipX + fa.DirX * 3.5f, fa.BottomEta + 0.2f, fa.LipZ + fa.DirZ * 3.5f),
+            Position = new Vector3(foot.X + fa.DirX * (mist ? 2f : 0.5f), fa.BottomEta + 0.2f, foot.Z + fa.DirZ * (mist ? 2f : 0.5f)),
             Rotation = new Vector3(0f, yaw, 0f),
             VisibilityAabb = new Aabb(new Vector3(-60, -5, -60), new Vector3(120, 40, 120)),
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,

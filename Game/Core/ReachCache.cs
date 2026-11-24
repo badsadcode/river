@@ -42,6 +42,7 @@ public static class ReachCache
             w.Write(fa.Side);
             w.Write(fa.TrailX.Length);
             for (int i = 0; i < fa.TrailX.Length; i++) { w.Write(fa.TrailX[i]); w.Write(fa.TrailZ[i]); w.Write(fa.TrailH[i]); }
+            WriteFloats(w, f.LipDist);
         }
     }
 
@@ -98,6 +99,7 @@ public static class ReachCache
                 fa.TrailX = new float[nt]; fa.TrailZ = new float[nt]; fa.TrailH = new float[nt];
                 for (int i = 0; i < nt; i++) { fa.TrailX[i] = rd.ReadSingle(); fa.TrailZ[i] = rd.ReadSingle(); fa.TrailH[i] = rd.ReadSingle(); }
                 f.Falls = fa;
+                f.LipDist = ReadFloats(rd, n);
             }
             return f;
         }

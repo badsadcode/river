@@ -308,3 +308,13 @@ at the landing, since there is no survival yet).
   lip ledges fewer, smaller, lower; mist puffs have a cloudy noise texture and random slow rotation. **Approach**: over
   the last 30 m above the lip the current speeds up to ×3 (≤ 3.5 m/s), the surface draws down by up to 0.35 m, and
   the shader roughens it with the speed. Shots `falls_brink`, `falls_close`.
+- **Fourth look** (Tom: "square blocks", mist on the sides): the generator stores each node's distance past the lip's
+  smooth curve (`ReachField.LipDist`, cached); within 40 m of the lip which water drops comes from that curve too.
+  River-surface cells across the drop are drawn twice, at the brink level and at the pool level, and the water shader
+  clips the upper copy exactly at the curve (`lip_tex`, `lip_mid`): the edge no longer follows the 2 m grid. (The
+  copies first took their levels 3 m along the flow; on the horseshoe's flanks that point was on the same side of the
+  lip, leaving vertices half-way: dark wedges rising from the pool. They now use the brink and pool levels.) The sheet
+  starts on the same curve (`FallsSpec.LipAt`) instead of searching the grid; it is thrown at least clear of the face;
+  it receives no shadows; the finest streaks fade where they would alias. Lip ledges removed (their gaps showed as
+  dark wedges; they read as logs). Spray and mist rise from the foot of the sheet, as wide as it. Shots `falls_side`,
+  `falls_edge`; `RIVER_FALLS_DEBUG=1` logs skipped columns.

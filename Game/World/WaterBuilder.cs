@@ -47,6 +47,16 @@ public static class WaterBuilder
         mat.SetShaderParameter("rocks", ra);
         mat.SetShaderParameter("rock_flow", rf);
         mat.SetShaderParameter("rock_count", nr);
+        // A waterfall: where the lip is (distance past its smooth curve per grid node) and the level between above and
+        // below, so the shader can clip the upper surface exactly at the lip.
+        if (f.Falls != null && f.LipDist != null)
+        {
+            var b = new byte[f.LipDist.Length * 4];
+            Buffer.BlockCopy(f.LipDist, 0, b, 0, b.Length);
+            mat.SetShaderParameter("lip_tex", ImageTexture.CreateFromImage(Image.CreateFromData(f.Nx, f.Nz, false, Image.Format.Rf, b)));
+            mat.SetShaderParameter("lip_mid", 0.5f * (f.Falls.TopEta + f.Falls.BottomEta));
+            mat.SetShaderParameter("has_lip", 1f);
+        }
         for (int cz = 0; cz < f.Nz - 1; cz += ChunkCells)
             for (int cx = 0; cx < f.Nx - 1; cx += ChunkCells)
             {
@@ -94,12 +104,34 @@ public static class WaterBuilder
                     {
                         int sx = x * Sub + qx, sz = z * Sub + qz;
                         int a = V(sx, sz), b = V(sx + 1, sz), c = V(sx, sz + 1), d = V(sx + 1, sz + 1);
-                        // Not across a waterfall's drop (the falls' curtain fills it).
+                        // Across a waterfall's drop the grid's heights sag from one level to the other. Draw such a cell twice
+                        // instead: once at the level above (the shader clips it exactly at the lip's smooth curve, lip_tex)
+                        // and once at the level below (under the sheet, it fills the pool to the foot of the face).
                         if (f.Falls != null)
                         {
                             float lo = MathF.Min(MathF.Min(verts[a].Y, verts[b].Y), MathF.Min(verts[c].Y, verts[d].Y));
                             float hi = MathF.Max(MathF.Max(verts[a].Y, verts[b].Y), MathF.Max(verts[c].Y, verts[d].Y));
-                            if (hi - lo > 0.3f) continue;   // (a cell half over the edge would sag into a dark band)
+                            if (hi - lo > 0.3f)
+                            {
+                                var fa = f.Falls;
+                                foreach (bool upper in new[] { true, false })
+                                {
+                                    int k0 = verts.Count;
+                                    foreach (int v in new[] { a, b, c, d })
+                                    {
+                                        var p = verts[v];
+                                        // The level above (at least the brink's, which is drawn down by ≤ 0.35 m) or the pool's below.
+                                        // (Not sampled a few metres along the flow: on the horseshoe's flanks that point can be on
+                                        // the same side of the lip, leaving a vertex half-way: dark wedges rising from the pool.)
+                                        float sx2 = p.X - fa.DirX * 3f, sz2 = p.Z - fa.DirZ * 3f;
+                                        float y = upper ? MathF.Max(MathF.Max(f.SampleEta(sx2, sz2), p.Y), fa.TopEta - 0.4f)
+                                                        : MathF.Min(p.Y, fa.BottomEta + 0.05f);
+                                        verts.Add(new Vector3(p.X, y, p.Z));
+                                    }
+                                    idx.Add(k0); idx.Add(k0 + 1); idx.Add(k0 + 3); idx.Add(k0); idx.Add(k0 + 3); idx.Add(k0 + 2);
+                                }
+                                continue;
+                            }
                         }
                         idx.Add(a); idx.Add(b); idx.Add(d); idx.Add(a); idx.Add(d); idx.Add(c);
                     }
