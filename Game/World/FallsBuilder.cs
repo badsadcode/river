@@ -32,6 +32,18 @@ public static class FallsBuilder
             return m;
         }
         root.AddChild(Sheet(cols, fa, veil: false, Mat(0)));
+        // Volume: two looser layers of streamers in front of the sheet, thrown further out the lower they fall.
+        // They must not write depth (they would hide the sheet behind them), so their shader is a copy without it.
+        var outerShader = new Shader { Code = shader.Code.Replace("depth_draw_always", "depth_draw_never") };
+        for (int layer = 1; layer <= 2; layer++)
+        {
+            var m = new ShaderMaterial { Shader = outerShader };
+            m.SetShaderParameter("drop", drop);
+            m.SetShaderParameter("mode", 0);
+            m.SetShaderParameter("layer", (float)layer);
+            m.RenderPriority = 2;
+            root.AddChild(Sheet(cols, fa, veil: false, m, layer));
+        }
         root.AddChild(Sheet(cols, fa, veil: true, Mat(1)));
         // Spray and mist rise all along the foot, where the water lands: an emitter every ~6 m of the curved sheet,
         // facing the way the water there falls.
@@ -44,6 +56,7 @@ public static class FallsBuilder
             float halfLen = 0.5f * (cols[q1 - 1].Across - cols[q0].Across) + 0.6f;
             root.AddChild(Spray(f, fa, foot, dir, halfLen, mist: false));
             root.AddChild(Spray(f, fa, foot, dir, halfLen, mist: true));
+            root.AddChild(Boil(f, fa, foot, dir, halfLen));
             // And at the brink: droplets torn off the edge, and a thin mist lying over it (blends the river into the drop).
             var brink = Vector3.Zero;
             for (int q = q0; q < q1; q++) brink += cols[q].Lip;
@@ -218,10 +231,10 @@ public static class FallsBuilder
                     for (int u = 0; u < S; u++)
                     {
                         int a0 = v * (S + 1) + u, a1 = a0 + 1, a2 = a0 + S + 2, a3 = a0 + S + 1;
-                        foreach (int q in new[] { a0, a1, a2, a0, a2, a3 }) { verts.Add(g[q]); colors.Add(new Color(tone, 0, 0)); }
+                        foreach (int q in new[] { a0, a2, a1, a0, a3, a2 }) { verts.Add(g[q]); colors.Add(new Color(tone, 0, 0)); }
                     }
             }
-            // Outward faces (the winding is checked in the capture: flip if they render inside out).
+            // Outward faces (Quad emits each triangle reversed: Godot's front faces are clockwise).
             Quad(2, 3, 7, 6);   // top
             Quad(0, 4, 5, 1);   // bottom
             Quad(4, 6, 7, 5);   // front (+fr)
@@ -307,7 +320,7 @@ public static class FallsBuilder
     /// cling closer to the rock. Columns join into a sheet where their lips are close; gaps where they aren't.
     /// COLOR: r = amount, g = seed.
     /// </summary>
-    static MeshInstance3D Sheet(List<Column> cols, FallsSpec fa, bool veil, ShaderMaterial mat)
+    static MeshInstance3D Sheet(List<Column> cols, FallsSpec fa, bool veil, ShaderMaterial mat, int layer = 0)
     {
         float drop = fa.TopEta - fa.BottomEta;
         var verts = new List<Vector3>(); var uvs = new List<Vector2>(); var colors = new List<Color>(); var idx = new List<int>();
@@ -316,7 +329,7 @@ public static class FallsBuilder
         {
             int start = verts.Count;
             float th = Throw(col, drop);
-            float out0 = veil ? 0.25f + 0.35f * col.Amount : 0f;
+            float out0 = veil ? 0.25f + 0.35f * col.Amount : layer * (0.22f + 0.2f * col.Amount);
             for (int r = 0; r <= Rows; r++)
             {
                 float u = r / (float)Rows;
@@ -327,7 +340,7 @@ public static class FallsBuilder
                 float fall = (col.Lip.Y - fa.BottomEta + 0.4f) * (0.35f * u * u + 0.65f * u);
                 verts.Add(col.Lip + col.Dir * fwd + new Vector3(0f, -fall, 0f));
                 uvs.Add(new Vector2(col.Across, u));
-                colors.Add(new Color(col.Amount, col.Seed, veil ? 1f : 0f));
+                colors.Add(new Color(col.Amount, layer == 0 ? col.Seed : (col.Seed + 0.37f * layer) % 1f, veil ? 1f : 0f));
             }
             // Side by side columns always join (gaps only where a ledge stands between them).
             if (prev >= 0 && MathF.Abs(col.Across - prevC) < 0.75f && col.Lip.DistanceTo(prevLip) < 3f)
@@ -338,7 +351,7 @@ public static class FallsBuilder
                 }
             prev = start; prevLip = col.Lip; prevC = col.Across;
         }
-        return MeshOf(veil ? "Veil" : "Curtain", verts, uvs, colors, idx, mat);
+        return MeshOf(veil ? "Veil" : layer == 0 ? "Curtain" : $"CurtainOuter{layer}", verts, uvs, colors, idx, mat);
     }
 
     /// <summary>
@@ -485,6 +498,49 @@ public static class FallsBuilder
             VisibilityAabb = new Aabb(new Vector3(-30, -15, -30), new Vector3(60, 30, 60)),
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
             Randomness = 0.6f,
+        };
+    }
+
+    /// <summary>
+    /// The boil where the falling water hits the pool: dense, short-lived puffs of white froth at the water line,
+    /// heaving up and spreading out, covering the join between the sheet and the pool.
+    /// </summary>
+    static GpuParticles3D Boil(ReachField f, FallsSpec fa, Vector3 foot, Vector3 dir, float halfSpan)
+    {
+        float co = MathF.Cos(f.Frame.Heading), si = MathF.Sin(f.Frame.Heading);
+        float wdx = dir.X * co + dir.Z * si, wdz = -dir.X * si + dir.Z * co;
+        var pm = new ParticleProcessMaterial
+        {
+            EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Box,
+            EmissionBoxExtents = new Vector3(halfSpan, 0.15f, 0.9f),
+            Direction = new Vector3(wdx * 0.6f, 1f, wdz * 0.6f).Normalized(),
+            Spread = 55f,
+            InitialVelocityMin = 0.6f, InitialVelocityMax = 2.2f,
+            Gravity = new Vector3(wdx * 0.8f, -3.5f, wdz * 0.8f),
+            ScaleMin = 0.5f, ScaleMax = 1.3f,
+            AngleMin = -180f, AngleMax = 180f,
+            AngularVelocityMin = -40f, AngularVelocityMax = 40f,
+            ColorRamp = new GradientTexture1D
+            {
+                Gradient = new Gradient
+                {
+                    Offsets = new[] { 0f, 0.15f, 1f },
+                    Colors = new[] { new Color(1, 1, 1, 0f), new Color(1, 1, 1, 0.75f), new Color(1, 1, 1, 0f) },
+                },
+            },
+        };
+        return new GpuParticles3D
+        {
+            Name = "FallsBoil",
+            Amount = 90,
+            Lifetime = 1.3f,
+            ProcessMaterial = pm,
+            DrawPass1 = new QuadMesh { Size = new Vector2(2.2f, 2.2f), Material = MistMaterial() },
+            Position = new Vector3(foot.X, fa.BottomEta + 0.15f, foot.Z),
+            Rotation = new Vector3(0f, MathF.Atan2(dir.X, dir.Z), 0f),
+            VisibilityAabb = new Aabb(new Vector3(-30, -5, -30), new Vector3(60, 20, 60)),
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            Randomness = 0.7f,
         };
     }
 

@@ -15,6 +15,7 @@ render_mode cull_disabled, depth_draw_always, specular_schlick_ggx, shadows_disa
 global uniform vec3 world_origin;
 
 uniform int mode = 0;
+uniform float layer = 0.0;           // 0 the sheet, 1-2 looser layers of streamers in front of it (volume)
 uniform float drop = 8.0;            // metres
 uniform vec3 glass_color : source_color = vec3(0.16, 0.25, 0.25);   // the river's own colour, curving over the brink
 uniform vec3 white_color : source_color = vec3(0.93, 0.95, 0.96);
@@ -99,7 +100,7 @@ void fragment() {
 			ROUGHNESS = mix(0.04, 0.65, white);
 			SPECULAR = mix(0.7, 0.35, white);
 			// Thin columns tear into separate threads; full ones stay a sheet. A little see-through everywhere.
-			float threads = smoothstep(0.62 - 0.5 * amount, 0.8 - 0.45 * amount, streak + 0.12 * (1.0 - down));
+			float threads = smoothstep(0.5 - 0.5 * amount, 0.9 - 0.45 * amount, streak + 0.12 * (1.0 - down));
 			float body = mix(threads, 1.0, smoothstep(0.75, 1.0, amount));
 			float a = mix(0.62, 0.95, white) * mix(1.0, body, smoothstep(0.08, 0.3, down));   // glassy water lets the rock show
 			// See-through between the strands lower down: the dark wet rock shows behind.
@@ -107,6 +108,8 @@ void fragment() {
 			ALBEDO *= mix(0.86, 1.0, hair);
 			// Soft top and bottom edges (into the river above and the churn below).
 			a *= smoothstep(0.0, 0.03, down) * (1.0 - smoothstep(0.93, 1.0, down) * 0.6);
+			// Outer layers: loose streamers only (most of it gaps), fainter further out.
+			if (layer > 0.5) a *= smoothstep(0.5, 0.75, hair * 0.5 + fine * 0.5) * (layer > 1.5 ? 0.35 : 0.6) * smoothstep(0.1, 0.4, down);
 			ALPHA = clamp(a, 0.0, 0.98);
 			BACKLIGHT = ALBEDO * 0.35 * white;
 		}

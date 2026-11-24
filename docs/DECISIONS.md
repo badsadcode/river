@@ -338,3 +338,7 @@ at the landing, since there is no survival yet).
   is wet near the falls, banded, with moss on upward faces and water films on steep ones. The sheet is more
   see-through so the rock shows. Other styles (tiered cascades, tall chutes in gorges, ledge falls in rapids) are
   possible later.
+- Tom's next round: the stone's triangles were wound inside out (seen from inside: flat dark "squares"), now flipped;
+  the sheet has volume (two looser layers of streamers in front, thrown further out lower down, drawn after the
+  river without writing depth: their shader is a runtime copy of Falls.gdshader with depth_draw_never); softer
+  thread edges (no angular shards); a boil of churning froth puffs where the water lands. Shot `falls_foot`.
