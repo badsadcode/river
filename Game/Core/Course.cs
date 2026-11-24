@@ -20,14 +20,15 @@ public sealed class CourseSettings
     public float StartEta = 100f;            // water level at the start (m); it only goes down
     // Features per 10 km of valley (the sandbox World.*Frequency settings will multiply these).
     public float Lakes = 0.25f, Splits = 0.7f, Riffles = 0.9f, Tributaries = 0.6f, Rapids = 0.3f;   // relative frequencies
-    public float MinFeatureGap = 600f;       // m between features (room for a cut and its clearance)
+    public float MinFeatureGap = 600f;
+    public float FallsFirstKm = 14f, FallsSpacingKm = 35f;   // waterfalls: rare, chapter-marking (DESIGN_PILLARS §4)       // m between features (room for a cut and its clearance)
     // Segments (cuts).
     public float MinSegment = 1500f, MaxSegment = 4000f, TargetSegment = 2500f;
     public float CutClearance = 250f;        // no feature within this of a cut
     public float CutWindow = 200f;           // the river must cross the cut line once within ±this
 }
 
-public enum FeatureKind { Lake, Split, Riffle, Confluence, Rapid }
+public enum FeatureKind { Lake, Split, Riffle, Confluence, Rapid, Falls }
 
 /// <summary>
 /// The character of a stretch of river, a few km long (blended into the next over 500 m): how strongly and how
@@ -76,6 +77,11 @@ public readonly record struct CourseFeature(FeatureKind Kind, double S0, double 
         sigma <= S0 || sigma >= S1 ? 0f
         : MathUtil.Smoothstep(0f, Ramp, (float)(sigma - S0)) * MathUtil.Smoothstep(0f, Ramp, (float)(S1 - sigma));
     public double Mid => 0.5 * (S0 + S1);
+
+    // Waterfalls (Kind == Falls; Size = drop in metres): a slow pool above the lip, the lip, a plunge pool below.
+    public const double FallsAbove = 280.0, FallsBelow = 170.0;
+    /// <summary>Valley distance of a waterfall's lip.</summary>
+    public double Lip => S1 - FallsBelow;
 }
 
 /// <summary>
@@ -118,6 +124,7 @@ public sealed class Course
 
     // Walk state.
     int _nextEvent; double _scheduledTo = 600.0; float _phase, _sAlong; int _vIdx;
+    double _nextFalls = double.NaN; int _fallsCount;
     readonly float _bearing, _maxSwing;
 
     public Course(CourseSettings settings)
@@ -161,6 +168,22 @@ public sealed class Course
                 : pick < s.Lakes + s.Splits + s.Riffles ? FeatureKind.Riffle
                 : pick < s.Lakes + s.Splits + s.Riffles + s.Tributaries ? FeatureKind.Confluence : FeatureKind.Rapid;
             int side = H(3) < 0.5f ? -1 : 1;
+            // Waterfalls on their own, much sparser schedule: the first after FallsFirstKm (±3 km), then every
+            // FallsSpacingKm (±10 km). When one is due before this feature would start, this feature is the falls.
+            if (double.IsNaN(_nextFalls))
+                _nextFalls = s.FallsFirstKm * 1000.0 + 6000.0 * (Noise.Hash01(0, 1, s.Seed + 951) - 0.5f);
+            if (s.FallsSpacingKm > 0f && _nextFalls < start + 450.0)
+            {
+                double fs = Math.Max(start, _nextFalls);
+                float fh(int k) => Noise.Hash01(_fallsCount, k, s.Seed + 952);
+                var falls = new CourseFeature(FeatureKind.Falls, fs, fs + CourseFeature.FallsAbove + CourseFeature.FallsBelow, 80f,
+                                              fh(1) < 0.5f ? -1 : 1, 6f + 8f * fh(2), s.Seed + 7500 + _fallsCount);
+                Features.Add(falls);
+                _scheduledTo = falls.S1;
+                _fallsCount++;
+                _nextFalls = fs + s.FallsSpacingKm * 1000.0 + 20000.0 * (fh(3) - 0.5f);
+                continue;
+            }
             // A segment carries at most one tributary: confluences at least a segment (+ margins) apart.
             if (kind == FeatureKind.Confluence)
                 foreach (var prev in Features)
@@ -315,6 +338,24 @@ public sealed class Course
     }
 
     /// <summary>Hydraulic half-width for the discharge (∝ Q^0.5, capped for the 1.2 km corridor), × the reach's width.</summary>
+    /// <summary>
+    /// A waterfall's shape at σ: the pool above the lip (0..1), the plunge pool below (0..1), the landing bay
+    /// (0..1, 60–120 m above the lip) and which side it is on.
+    /// </summary>
+    (float above, float plunge, float bay, bool bayRight) FallsShape(double sigma)
+    {
+        foreach (var f in Features)
+        {
+            if (f.Kind != FeatureKind.Falls || sigma < f.S0 - 1 || sigma > f.S1 + 1) continue;
+            float t = (float)(sigma - f.Lip);
+            float above = MathUtil.Smoothstep((float)-CourseFeature.FallsAbove, -180f, t) * (t < 0f ? 1f : 0f);
+            float plunge = t >= 0f ? MathUtil.Smoothstep((float)CourseFeature.FallsBelow, 70f, t) : 0f;
+            float bay = MathUtil.Smoothstep(-160f, -120f, t) * MathUtil.Smoothstep(-40f, -70f, t);
+            return (above, plunge, bay, f.Side > 0);
+        }
+        return (0f, 0f, 0f, false);
+    }
+
     /// <summary>Extra friction slope in rapids, × the bed's (tuned so rapid segments calibrate like plain ones).</summary>
     public static float RapidLoss = 0.25f;
 
@@ -328,6 +369,7 @@ public sealed class Course
         float riffle = FeatureWeight(FeatureKind.Riffle, sigma);
         float split = FeatureWeight(FeatureKind.Split, sigma);
         float rapid = FeatureWeight(FeatureKind.Rapid, sigma);
+        var (above, plunge, bay, bayRight) = FallsShape(sigma);
         float q = DischargeAt(sigma);
         float qr = q / s.StartDischarge;
         var reach = ReachAt(sigma);
@@ -358,6 +400,11 @@ public sealed class Course
         depth = MathUtil.Lerp(depth, 2f * depth, lake);
         depth = MathUtil.Lerp(depth, 1.05f, riffle);
         depth = MathUtil.Lerp(depth, 1.3f, rapid);
+        // Waterfalls: a wide, deep, slow pool above the lip (with a slack bay on the landing side, where a raft can
+        // pull in), and a deep plunge pool below.
+        hl *= 1f + 0.5f * above + 0.45f * plunge; hr *= 1f + 0.5f * above + 0.45f * plunge;
+        if (bayRight) hr *= 1f + 0.6f * bay; else hl *= 1f + 0.6f * bay;
+        depth *= (1f + 0.6f * above) * (1f + 1.2f * plunge);
 
         // Water level: friction slope from the same conveyance the 2D flow solver uses, ∫ h^(5/3) dy across the bed
         // profile segments carve (ReachGenerator.ProfileDepth), so Q = ∫h^(5/3)dy · √S / n. (The textbook A·R^(2/3)
@@ -372,6 +419,9 @@ public sealed class Course
             // extra head loss, so the course's level agrees with what its segment will compute.
             float rocks = 1f + RapidLoss * FeatureWeight(FeatureKind.Rapid, Sigma[^1]);
             eta = Eta[^1] - sf * sf * rocks * Centerline.Step;
+            // Over a waterfall's lip the level drops by its height in one step.
+            foreach (var f in Features)
+                if (f.Kind == FeatureKind.Falls && Sigma[^1] < f.Lip && sigma >= f.Lip) eta -= f.Size;
         }
 
         Heading.Add(heading); HalfLeft.Add(hl); HalfRight.Add(hr); MaxDepth.Add(depth);
@@ -405,6 +455,7 @@ public sealed class Course
         float lake = FeatureWeight(FeatureKind.Lake, sigma);
         float riffle = FeatureWeight(FeatureKind.Riffle, sigma);
         float rapid = FeatureWeight(FeatureKind.Rapid, sigma);
+        float falls = FeatureWeight(FeatureKind.Falls, sigma);
         var reach = ReachAt(sigma);
         // The meanders' scale: the hydraulic width for the discharge and reach (not the breathing width, which would
         // feed back into the bends); a lake doesn't stretch the meanders.
@@ -415,7 +466,7 @@ public sealed class Course
         float straight = CutWeight(sigma);   // runs straighter through segment cuts
         float ampNoise = 0.8f * Noise.Fbm1(_sAlong / 900f, s.Seed + 11) + 0.35f * Noise.Fbm1(_sAlong / 260f, s.Seed + 15);
         float amp = Math.Clamp(reach.AmpBase + reach.AmpVar * ampNoise, 0.15f, 1.95f)
-                  * (1f - 0.92f * lake) * (1f - 0.6f * riffle) * (1f - 0.7f * rapid) * (1f - 0.85f * straight);
+                  * (1f - 0.92f * lake) * (1f - 0.6f * riffle) * (1f - 0.7f * rapid) * (1f - 0.95f * falls) * (1f - 0.85f * straight);
         // Along the river (not the valley): ×16 widths here ≈ 10–14 widths along the valley, as real meanders.
         float wavelength = 16f * 2f * baseHalf * reach.Wavelength * MathF.Max(0.45f, 1f + 0.6f * Noise.Fbm1(_sAlong / 600f, s.Seed + 12)
                                                                                   + 0.25f * Noise.Fbm1(_sAlong / 170f, s.Seed + 16));

@@ -26,6 +26,8 @@ public sealed class SegmentSpec
     /// <summary>Still water on the floodplain (oxbow lakes): not connected to the river, at their own level.</summary>
     public List<StillWater> StillWaters = new();
     public List<Snag> Snags = new();
+    /// <summary>A waterfall in this segment (at most one), or null.</summary>
+    public FallsSpec Falls;
     public Inflow[] Inflows = Array.Empty<Inflow>();
     public float OutletEta;                         // water level held along the downstream edge (m)
     /// <summary>
@@ -59,3 +61,21 @@ public sealed class StillWater
 
 /// <summary>World position → (σ along the course's valley, signed offset from its axis); hint speeds up the search.</summary>
 public delegate (double sigma, float offset) ValleyLookup((double x, double z) world, ref int hint);
+
+/// <summary>
+/// A waterfall in a segment (grid-local coordinates): its lip, drop, the landing above it and the put-in below it,
+/// and the portage trail between them along one bank (docs/DECISIONS.md D21).
+/// </summary>
+public sealed class FallsSpec
+{
+    public float LipX, LipZ, DirX, DirZ;        // centre of the lip and the flow direction there (unit)
+    public float HalfWidth;                     // river half-width at the lip (the wider side)
+    public float Height;                        // drop (m)
+    public int Side;                            // +1: landing and trail on the river's right bank
+    public float LandingX, LandingZ;            // water above the falls, by the trail head (where the raft is hauled out)
+    public float PutInX, PutInZ;                // water below the falls, by the trail's end
+    public float[] TrailX, TrailZ;              // trail polyline, landing → put-in
+    // Filled in by the generator:
+    public float TopEta, BottomEta;             // water levels above and below the lip
+    public float[] TrailH;                      // trail ground height at each polyline point
+}

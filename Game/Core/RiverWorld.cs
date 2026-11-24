@@ -39,6 +39,10 @@ public sealed class RiverWorld
     /// <summary>Rocks of all loaded segments in world coordinates (position and approaching current).</summary>
     public IReadOnlyList<Rock> Rocks => _rocks;
 
+    /// <summary>Waterfalls of all loaded segments, in world coordinates (portage, wrecks).</summary>
+    public IReadOnlyList<WorldFalls> Falls => _falls;
+    readonly List<WorldFalls> _falls = new();
+
     void RebuildRocks()
     {
         _rocks.Clear();
@@ -53,6 +57,23 @@ public sealed class RiverWorld
                 w.FlowX = (float)(r.FlowX * co + r.FlowZ * si); w.FlowZ = (float)(-r.FlowX * si + r.FlowZ * co);
                 _rocks.Add(w);
             }
+        }
+        _falls.Clear();
+        foreach (var (k, f) in _segments)
+        {
+            if (f.Falls is not { } fa) continue;
+            double co = Math.Cos(f.Frame.Heading), si = Math.Sin(f.Frame.Heading);
+            var wf = new WorldFalls
+            {
+                Segment = k, Height = fa.Height, HalfWidth = fa.HalfWidth, TopEta = fa.TopEta, BottomEta = fa.BottomEta, Side = fa.Side,
+                DirX = (float)(fa.DirX * co + fa.DirZ * si), DirZ = (float)(-fa.DirX * si + fa.DirZ * co),
+                TrailX = new double[fa.TrailX.Length], TrailZ = new double[fa.TrailX.Length], TrailH = (float[])fa.TrailH.Clone(),
+            };
+            (wf.LipX, wf.LipZ) = f.Frame.ToWorld(fa.LipX, fa.LipZ);
+            (wf.LandingX, wf.LandingZ) = f.Frame.ToWorld(fa.LandingX, fa.LandingZ);
+            (wf.PutInX, wf.PutInZ) = f.Frame.ToWorld(fa.PutInX, fa.PutInZ);
+            for (int j = 0; j < fa.TrailX.Length; j++) (wf.TrailX[j], wf.TrailZ[j]) = f.Frame.ToWorld(fa.TrailX[j], fa.TrailZ[j]);
+            _falls.Add(wf);
         }
     }
 
@@ -149,4 +170,21 @@ public sealed class RiverWorld
         VelX = a.VelX + (b.VelX - a.VelX) * t, VelZ = a.VelZ + (b.VelZ - a.VelZ) * t,
         Foam = a.Foam + (b.Foam - a.Foam) * t, Eddy = a.Eddy + (b.Eddy - a.Eddy) * t,
     };
+}
+
+/// <summary>A loaded waterfall in world coordinates (see <see cref="FallsSpec"/>).</summary>
+public sealed class WorldFalls
+{
+    public int Segment, Side;
+    public double LipX, LipZ, LandingX, LandingZ, PutInX, PutInZ;
+    public float DirX, DirZ, HalfWidth, Height, TopEta, BottomEta;
+    public double[] TrailX, TrailZ;
+    public float[] TrailH;
+
+    /// <summary>Signed distance past the lip along the flow (+ downstream) and across it, of a world point.</summary>
+    public (double along, double across) Relative(double x, double z)
+    {
+        double dx = x - LipX, dz = z - LipZ;
+        return (dx * DirX + dz * DirZ, -dx * DirZ + dz * DirX);
+    }
 }

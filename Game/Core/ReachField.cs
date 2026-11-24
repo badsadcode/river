@@ -48,6 +48,7 @@ public sealed class ReachField
     public readonly List<Rock> Rocks = new();
     public readonly List<Centerline> SideChannels = new();
     public readonly List<Snag> Snags = new();
+    public FallsSpec Falls;                     // the segment's waterfall, or null
 
     /// <summary>Linear fit of the water surface along the valley: EtaTrendA + EtaTrendB·z.</summary>
     public float EtaTrendA, EtaTrendB;

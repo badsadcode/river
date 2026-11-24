@@ -204,9 +204,12 @@ public static class ReachGenerator
         Log($"inflow main {inMain:F1} m³/s, tributary {inTrib:F1} m³/s; {pondCount} still-water nodes; {stillCount} isolated water nodes turned to land");
 
         // ------------------------------------------------------------ 7. flow: surface and current
+        // A waterfall can't be solved for (its drop is not friction): solve as if the water below the lip stood its
+        // height higher, then lower it by that (7d).
+        float outletSolve = s.OutletEta + (s.Falls?.Height ?? 0f);
         var problem = new FlowSolver.Problem
         {
-            Nx = nx, Nz = nz, Cell = s.Cell, Active = connected, Fixed = fixedNode, FixedEta = s.OutletEta,
+            Nx = nx, Nz = nz, Cell = s.Cell, Active = connected, Fixed = fixedNode, FixedEta = outletSolve,
             Depth = f.Depth, Source = source, Manning = s.Manning, RefSlope = s.RefSlope,
         };
         var res = s.ReferencePicardSteps > 0 ? FlowSolver.Solve(problem, s.ReferencePicardSteps, m => Log(m)) : FlowSolver.SolveMultilevel(problem, m => Log(m));
@@ -235,7 +238,7 @@ public static class ReachGenerator
         if (!float.IsNaN(s.InletEtaTarget))
         {
             float inEta = DeepestEtaInRow(f, connected, 1);
-            float r = (inEta - s.OutletEta) / MathF.Max(0.01f, s.InletEtaTarget - s.OutletEta);
+            float r = (inEta - outletSolve) / MathF.Max(0.01f, s.InletEtaTarget - outletSolve);
             if (!float.IsNaN(r) && MathF.Abs(r - 1f) > 0.002f)
             {
                 r = Math.Clamp(r, 0.5f, 2f);
@@ -256,7 +259,7 @@ public static class ReachGenerator
                 {
                     float inNow = DeepestEtaInRow(f, connected, 1);
                     if (MathF.Abs(inNow - s.InletEtaTarget) < 0.012f) break;
-                    float r2 = (inNow - s.OutletEta) / MathF.Max(0.01f, s.InletEtaTarget - s.OutletEta);
+                    float r2 = (inNow - outletSolve) / MathF.Max(0.01f, s.InletEtaTarget - outletSolve);
                     if (float.IsNaN(r2)) break;
                     c = Math.Clamp(c * MathF.Sqrt(Math.Clamp(r2, 0.5f, 2f)), 0.4f, 2.5f);
                     for (int i = 0; i < total; i++) velScale[i] = keep[i] * c;
@@ -269,6 +272,32 @@ public static class ReachGenerator
             }
         }
         Eddies.AddRecirculation(f, connected, lee, lineArr, nearIdx, lineOf, m => Log(m));
+
+        // ------------------------------------------------------------ 7d. the waterfall's drop (D21)
+        // Below the lip (by the nearest main centre-line sample, so a perpendicular line across the river) the water
+        // stands its height lower. The plunge pool's first 24 m are churned white.
+        float[] fallsFoam = null;
+        if (s.Falls is { } falls)
+        {
+            int kLip = f.Main.Nearest(falls.LipX, falls.LipZ);
+            fallsFoam = new float[total];
+            int below = 0;
+            for (int i = 0; i < total; i++)
+            {
+                if (!connected[i]) continue;
+                int k = mainIdx[i];
+                bool isBelow = k >= 0 ? k > kLip
+                    : ((i % nx) * s.Cell - falls.LipX) * falls.DirX + ((i / nx) * s.Cell - falls.LipZ) * falls.DirZ > 0f;
+                if (!isBelow) continue;
+                f.Eta[i] -= falls.Height;
+                below++;
+                if (k >= 0 && k <= kLip + 12) fallsFoam[i] = MathUtil.Smoothstep(kLip + 12, kLip + 2, k);
+            }
+            falls.TopEta = f.SampleEta(falls.LandingX, falls.LandingZ);
+            falls.BottomEta = f.SampleEta(falls.PutInX, falls.PutInZ);
+            f.Falls = falls;
+            Log($"waterfall: {falls.Height:F1} m drop, {below} water nodes below the lip, levels {falls.TopEta:F2} / {falls.BottomEta:F2}");
+        }
         Log($"flow with lee zones, outflow {f.OutflowMeasured:F1} m³/s");
         // Each rock's approaching current: the mean on a ring around it (at the rock itself the water is held back).
         for (int k = 0; k < f.Rocks.Count; k++)
@@ -389,12 +418,67 @@ public static class ReachGenerator
                 if (s.ValleyAt != null && sdf < 0f)
                     f.Height[i] = MathF.Max(f.Height[i], f.Eta[i] + 0.1f + MathF.Min(isl.MaxHeight, 0.6f) * MathUtil.Clamp01(-sdf / 3f));
             });
+        if (f.Falls != null) CarveTrail(f, f.Falls);
         Log("terrain");
 
         // ------------------------------------------------------------ 9. foam
-        ComputeFoam(f, connected, s);
+        ComputeFoam(f, connected, s, fallsFoam);
         Log("foam");
         return f;
+    }
+
+    // ================================================================ the portage trail
+
+    /// <summary>
+    /// The portage trail: a 4 m wide cut along its polyline, level with the water's edge at the landing, ramping down
+    /// the waterfall's scarp over 70 m around where it passes the lip, level again at the put-in. Fills in TrailH.
+    /// </summary>
+    static void CarveTrail(ReachField f, FallsSpec falls)
+    {
+        // Dense points every metre with their distance along the trail.
+        var px = new List<float>(); var pz = new List<float>(); var ps = new List<float>();
+        float acc = 0f;
+        for (int j = 0; j + 1 < falls.TrailX.Length; j++)
+        {
+            float dx = falls.TrailX[j + 1] - falls.TrailX[j], dz = falls.TrailZ[j + 1] - falls.TrailZ[j];
+            float len = MathF.Sqrt(dx * dx + dz * dz);
+            int n = Math.Max(1, (int)MathF.Ceiling(len));
+            for (int q = 0; q < n; q++) { px.Add(falls.TrailX[j] + dx * q / n); pz.Add(falls.TrailZ[j] + dz * q / n); ps.Add(acc + len * q / n); }
+            acc += len;
+        }
+        px.Add(falls.TrailX[^1]); pz.Add(falls.TrailZ[^1]); ps.Add(acc);
+        // Where the trail passes the lip.
+        float sLip = acc * 0.5f;
+        for (int j = 0; j < px.Count; j++)
+            if ((px[j] - falls.LipX) * falls.DirX + (pz[j] - falls.LipZ) * falls.DirZ > 0f) { sLip = ps[j]; break; }
+        float top = falls.TopEta + 0.6f, bot = falls.BottomEta + 0.6f;
+        float H(float sAlong) => MathUtil.Lerp(top, bot, MathUtil.Smoothstep(sLip - 35f, sLip + 35f, sAlong));
+        // Heights at the polyline's own points (the game moves the raft along those).
+        falls.TrailH = new float[falls.TrailX.Length];
+        float a2 = 0f;
+        for (int j = 0; j < falls.TrailX.Length; j++)
+        {
+            if (j > 0) a2 += MathF.Sqrt((falls.TrailX[j] - falls.TrailX[j - 1]) * (falls.TrailX[j] - falls.TrailX[j - 1]) +
+                                        (falls.TrailZ[j] - falls.TrailZ[j - 1]) * (falls.TrailZ[j] - falls.TrailZ[j - 1]));
+            falls.TrailH[j] = H(a2);
+        }
+        // Carve the land (water nodes are left alone).
+        const float reach = 7.5f;
+        for (int j = 0; j < px.Count; j += 2)
+            ForNodesNear(f, px[j], pz[j], reach, i =>
+            {
+                if (f.Water[i]) return;
+                float x = (i % f.Nx) * f.Cell, z = (i / f.Nx) * f.Cell;
+                // Nearest dense point (search a window around j).
+                int best = j; float bd = float.MaxValue;
+                for (int q = Math.Max(0, j - 10); q < Math.Min(px.Count, j + 11); q++)
+                {
+                    float d2 = (px[q] - x) * (px[q] - x) + (pz[q] - z) * (pz[q] - z);
+                    if (d2 < bd) { bd = d2; best = q; }
+                }
+                float k = MathUtil.Smoothstep(reach, 3f, MathF.Sqrt(bd));
+                f.Height[i] = MathUtil.Lerp(f.Height[i], H(ps[best]), k);
+            });
     }
 
     // ================================================================ grid helpers
@@ -557,7 +641,7 @@ public static class ReachGenerator
         });
     }
 
-    static void ComputeFoam(ReachField f, bool[] active, SegmentSpec s)
+    static void ComputeFoam(ReachField f, bool[] active, SegmentSpec s, float[] extra = null)
     {
         int nx = f.Nx, nz = f.Nz, total = nx * nz;
         var src = new float[total];
@@ -591,6 +675,7 @@ public static class ReachGenerator
                 float e = f.Eddy[i];
                 v += 0.6f * MathUtil.Smoothstep(0.35f, 0.9f, 4f * e * (1f - e)) * MathUtil.Smoothstep(0.25f, 1.0f, sp);
             }
+            if (extra != null) v = MathF.Max(v, extra[i]);
             src[i] = MathUtil.Clamp01(v);
         }
         // Snags: the water folds around a trunk lying in the current.

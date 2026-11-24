@@ -22,7 +22,7 @@ namespace River;
 ///   --seconds=S            simulated seconds before capturing (raft drifting, etc.)
 ///   --regen                ignore the segment cache
 ///   --drift-test=S         headless: drift the raft S seconds with streaming and report (tools/drift_test.sh)
-///   --start=NAME           start the raft just above the first rapid, riffle, lake, split, confluence, or 400 m into the
+///   --start=NAME           start the raft just above the first rapid, falls, riffle, lake, split, confluence, or 400 m into the
 ///                          first gorge, braided, … reach (playtesting; works in the exported game too)
 ///   --no-trees             placeholder trees instead of the NoorForm packs
 ///   --water=a=1;b=2        override water shader uniforms (tuning), --nomist hide the mist
@@ -37,6 +37,7 @@ public partial class Main : Node3D
     public FreeCamera FlyCam { get; private set; }
     public Raft.Raft Raft { get; private set; }
     public Player.PlayerController Player { get; private set; }
+    public Raft.Portage Portage { get; private set; }
     /// <summary>Metres travelled down the valley since the start.</summary>
     public float Distance { get; private set; }
 
@@ -149,6 +150,9 @@ public partial class Main : Node3D
         Player = new Player.PlayerController { Name = "Player" };
         Raft.AddChild(Player);
         Player.Setup(Raft);
+        Portage = new Raft.Portage { Name = "Portage" };
+        AddChild(Portage);
+        Portage.Setup(Raft, Player, World);
         Streamer.Focus = () => Raft.GlobalPosition;
         Origin.Shifted += d =>
         {
@@ -161,6 +165,7 @@ public partial class Main : Node3D
         AddChild(new Hud { Name = "Hud" });
         _status.Visible = false;
 
+        if (_args.ContainsKey("portage-test")) { Streamer.StartWorker(); _ = PortageTest(); return; }
         if (_args.ContainsKey("drift-test"))
         {
             // In a window (performance runs) look from the deck; headless there is nothing to look at.
@@ -283,6 +288,56 @@ public partial class Main : Node3D
         return Origin.ToScene(x, MathF.Max(s.Height, s.Eta) + up, z);
     }
 
+    /// <summary>
+    /// --portage-test (use with --start=falls): 1) let the raft drift to the falls and check it is wrecked and rebuilt
+    /// at the landing; 2) put the player ashore at the trail post, haul the raft out and push it (the player walking
+    /// behind it) until it is afloat below the falls. Prints PORTAGE lines and a PORTAGE RESULT.
+    /// </summary>
+    async System.Threading.Tasks.Task PortageTest()
+    {
+        await ToSignal(GetTree().CreateTimer(1.0), SceneTreeTimer.SignalName.Timeout);
+        if (World.Falls.Count == 0) { GD.Print("PORTAGE RESULT: no waterfall loaded"); GetTree().Quit(); return; }
+        var fa = World.Falls[0];
+        // 1. Drift over the edge (up to 10 minutes, the raft pushed downstream a little to speed it up).
+        double t = 0;
+        while (Portage.Wrecks == 0 && t < 600)
+        {
+            await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);
+            t += GetPhysicsProcessDeltaTime();
+            Raft.ApplyCentralForce(new Vector3(fa.DirX, 0, fa.DirZ) * 3000f);
+        }
+        GD.Print($"PORTAGE: over the falls after {t:F0} s, wrecks {Portage.Wrecks}");
+        await ToSignal(GetTree().CreateTimer(2.5), SceneTreeTimer.SignalName.Timeout);
+        var (lx, lz) = Origin.ToWorld(Raft.GlobalPosition);
+        double toLanding = Math.Sqrt((lx - fa.LandingX) * (lx - fa.LandingX) + (lz - fa.LandingZ) * (lz - fa.LandingZ));
+        GD.Print($"PORTAGE: raft {toLanding:F1} m from the landing, anchored {Raft.AnchorDown}");
+        // 2. Ashore, haul, push.
+        Player.Reparent(this, true);
+        Player.GlobalPosition = Origin.ToScene(fa.TrailX[0], fa.TrailH[0] + 1.2f, fa.TrailZ[0]);
+        await ToSignal(GetTree().CreateTimer(1.0), SceneTreeTimer.SignalName.Timeout);
+        Portage.BeginForTest(fa);
+        Portage.ForcePush = true;
+        double pushT = 0; float minDeckY = float.MaxValue;
+        while (Portage.Relaunches == 0 && pushT < 900)
+        {
+            await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);
+            pushT += GetPhysicsProcessDeltaTime();
+            // The player walks right behind the raft.
+            var back = Raft.GlobalTransform.Basis.Z;   // bow is −Z
+            var target = Raft.GlobalPosition + new Vector3(back.X, 0, back.Z).Normalized() * 4.2f;
+            Player.GlobalPosition = new Vector3(target.X, Raft.GlobalPosition.Y + 0.5f, target.Z);
+            minDeckY = MathF.Min(minDeckY, Raft.GlobalPosition.Y);
+        }
+        Portage.ForcePush = false;
+        await ToSignal(GetTree().CreateTimer(3.0), SceneTreeTimer.SignalName.Timeout);
+        var (px, pz) = Origin.ToWorld(Raft.GlobalPosition);
+        double toPutIn = Math.Sqrt((px - fa.PutInX) * (px - fa.PutInX) + (pz - fa.PutInZ) * (pz - fa.PutInZ));
+        float depth = World.DepthAt(px, pz);
+        GD.Print($"PORTAGE RESULT: wrecked {Portage.Wrecks}×, rebuilt {toLanding:F1} m from the landing; portage took {pushT:F0} s of pushing, " +
+                 $"relaunched {Portage.Relaunches}×, afloat {toPutIn:F1} m from the put-in in {depth:F1} m of water, raft speed {Raft.LinearVelocity.Length():F2} m/s");
+        GetTree().Quit();
+    }
+
     /// <summary>A scene point on the water at world (x, z), <paramref name="up"/> above it.</summary>
     Vector3 OnWater(double x, double z, float up) => Origin.ToScene(x, World.EtaAt(x, z) + up, z);
 
@@ -380,6 +435,18 @@ public partial class Main : Node3D
                 float dx = best.FlowX / spd, dz = best.FlowZ / spd;
                 FlyCam.LookAtPoint(OnWater(best.X - dx * 4f - dz * 4.5f, best.Z - dz * 4f + dx * 4.5f, 3.2f),
                                    OnWater(best.X + dx * 0.8f, best.Z + dz * 0.8f, 0f));
+                break;
+            }
+            case "falls":
+            case "falls_top":
+            {
+                if (FindFeature(FeatureKind.Falls) is not { } f) break;
+                var lip = At(f.Lip); var below = At(f.Lip + 70.0);
+                if (name == "falls")
+                    // From the plunge pool, looking back up at the curtain.
+                    FlyCam.LookAtPoint(OnWater(below.x - below.rx * 0.25f * below.hr, below.z - below.rz * 0.25f * below.hr, 3f), OnWater(lip.x, lip.z, -2f));
+                else
+                    FlyCam.LookAtPoint(OnWater(lip.x - lip.tx * 160.0 + lip.rx * 110.0, lip.z - lip.tz * 160.0 + lip.rz * 110.0, 80f), OnWater(lip.x, lip.z, -3f));
                 break;
             }
             case "shift":

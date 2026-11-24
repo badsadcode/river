@@ -94,6 +94,13 @@ public static class WaterBuilder
                     {
                         int sx = x * Sub + qx, sz = z * Sub + qz;
                         int a = V(sx, sz), b = V(sx + 1, sz), c = V(sx, sz + 1), d = V(sx + 1, sz + 1);
+                        // Not across a waterfall's drop (the falls' curtain fills it).
+                        if (f.Falls != null)
+                        {
+                            float lo = MathF.Min(MathF.Min(verts[a].Y, verts[b].Y), MathF.Min(verts[c].Y, verts[d].Y));
+                            float hi = MathF.Max(MathF.Max(verts[a].Y, verts[b].Y), MathF.Max(verts[c].Y, verts[d].Y));
+                            if (hi - lo > 1f) continue;
+                        }
                         idx.Add(a); idx.Add(b); idx.Add(d); idx.Add(a); idx.Add(d); idx.Add(c);
                     }
             }

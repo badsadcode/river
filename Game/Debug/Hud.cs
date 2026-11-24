@@ -7,7 +7,7 @@ namespace River.Debug;
 /// <summary>Minimal on-screen info: controls (H hides them) and raft/water telemetry (F3).</summary>
 public partial class Hud : CanvasLayer
 {
-    Label _info, _help;
+    Label _info, _help, _prompt;
     bool _showHelp = true, _showInfo;
 
     public override void _Ready()
@@ -24,6 +24,14 @@ public partial class Hud : CanvasLayer
         _info.AddThemeColorOverride("font_shadow_color", new Color(0, 0, 0, 0.8f));
         _info.AddThemeConstantOverride("shadow_offset_x", 1); _info.AddThemeConstantOverride("shadow_offset_y", 1);
         AddChild(_info);
+        // What to do next (portage, waterfalls): centred near the bottom of the screen.
+        _prompt = new Label { HorizontalAlignment = HorizontalAlignment.Center, AutowrapMode = TextServer.AutowrapMode.WordSmart };
+        _prompt.AddThemeFontSizeOverride("font_size", 20);
+        _prompt.AddThemeColorOverride("font_shadow_color", new Color(0, 0, 0, 0.85f));
+        _prompt.AddThemeConstantOverride("shadow_offset_x", 2); _prompt.AddThemeConstantOverride("shadow_offset_y", 2);
+        _prompt.SetAnchorsPreset(Control.LayoutPreset.CenterBottom);
+        _prompt.OffsetLeft = -420; _prompt.OffsetRight = 420; _prompt.OffsetTop = -130; _prompt.OffsetBottom = -70;
+        AddChild(_prompt);
         // Hidden during screenshots.
         Visible = !(OS.GetCmdlineUserArgs().Length > 0 && Array.Exists(OS.GetCmdlineUserArgs(), a => a.StartsWith("--shot") || a.StartsWith("--cam")));
     }
@@ -44,6 +52,7 @@ public partial class Hud : CanvasLayer
         var main = River.Main.Instance;
         if (main?.Raft == null) return;
         _help.Visible = _showHelp;
+        _prompt.Text = main.Portage?.Prompt ?? "";
         _info.Position = new Vector2(24, _showHelp ? 70 : 20);
         // Text 4 times a second: rebuilding strings every frame is garbage the collector has to pause for.
         _refresh -= delta;

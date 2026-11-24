@@ -218,6 +218,46 @@ Console.WriteLine("Segments:");
         Check(channels > 0 && channelsFlowing == channels, $"side channels carry a current downstream ({channelsFlowing}/{channels})");
     }
 
+    // The first waterfall: the drop, a slack landing above it, a trail a raft can be pushed along, water conserved.
+    {
+        var wc = new Course(new CourseSettings());
+        wc.ExtendTo(60000.0);
+        CourseFeature falls = default; bool found = false;
+        foreach (var f in wc.Features) if (f.Kind == FeatureKind.Falls) { falls = f; found = true; break; }
+        Check(found, "a waterfall within 60 km");
+        if (found)
+        {
+            int k = 1; while (wc.Cuts[k + 1] <= falls.Lip) k++;
+            var spec = CourseSegments.Spec(wc, k);
+            var ff = ReachGenerator.Generate(spec, Environment.GetEnvironmentVariable("RIVER_LOG") != null ? m => Console.WriteLine("    " + m) : null);
+            var fa = ff.Falls;
+            Check(fa != null, "the waterfall's segment carries it");
+            if (fa != null)
+            {
+                float drop = fa.TopEta - fa.BottomEta;
+                var (lvx, lvz) = ff.SampleVelocity(fa.LandingX, fa.LandingZ);
+                float landingSpeed = MathF.Sqrt(lvx * lvx + lvz * lvz);
+                float steepest = 0f, trailLen = 0f;
+                for (int j = 1; j < fa.TrailX.Length; j++)
+                {
+                    float d = MathF.Sqrt((fa.TrailX[j] - fa.TrailX[j - 1]) * (fa.TrailX[j] - fa.TrailX[j - 1]) + (fa.TrailZ[j] - fa.TrailZ[j - 1]) * (fa.TrailZ[j] - fa.TrailZ[j - 1]));
+                    trailLen += d;
+                    if (d > 0.5f) steepest = MathF.Max(steepest, MathF.Abs(fa.TrailH[j] - fa.TrailH[j - 1]) / d);
+                }
+                // The carved ground along the trail matches its heights.
+                float worstGround = 0f;
+                for (int j = 1; j + 1 < fa.TrailX.Length; j++)
+                    worstGround = MathF.Max(worstGround, MathF.Abs(ff.SampleHeight(fa.TrailX[j], fa.TrailZ[j]) - fa.TrailH[j]));
+                Console.WriteLine($"  waterfall at σ {falls.Lip:F0} m (segment {k}): {fa.Height:F1} m high, levels {fa.TopEta:F2} / {fa.BottomEta:F2}, " +
+                                  $"landing current {landingSpeed:F2} m/s, trail {trailLen:F0} m, steepest {steepest * 100:F0} %, ground off the trail by ≤ {worstGround:F2} m");
+                Check(MathF.Abs(drop - fa.Height) < 0.8f, "the water drops by the waterfall's height at its lip");
+                Check(landingSpeed < 0.6f, "the landing above the falls is slack enough to pull in");
+                Check(steepest < 0.3f && worstGround < 0.5f, "the portage trail is cut into the ground and gentle enough to push a raft along");
+                Check(Math.Abs(ff.OutflowMeasured - ff.InflowTotal) < 0.03f * ff.InflowTotal, "no water lost in the waterfall's segment");
+            }
+        }
+    }
+
     // The first rapid: faster than the river around it, a chute deep enough for a raft, water conserved.
     {
         var rc = new Course(new CourseSettings());

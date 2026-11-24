@@ -59,6 +59,7 @@ public static class Vegetation
                 float hz = f.SampleHeight(px, pz + 1.5f) - f.SampleHeight(px, pz - 1.5f);
                 float slope = MathF.Sqrt(hx * hx + hz * hz) / 3f;
                 if (slope > 0.8f) continue;
+                if (f.Falls != null && NearTrail(f.Falls, px, pz, 6f)) continue;   // the portage trail stays clear
 
                 // Forest mask: woods with clearings and meadows; riparian belt along the water; walls wooded.
                 float forest = Noise.Fbm(px / 260f, pz / 260f, f.Seed + 5101, 3) * 0.5f + 0.5f;
@@ -141,6 +142,18 @@ public static class Vegetation
         root.AddChild(BuildRocks(f));
         if (f.Snags.Count > 0) root.AddChild(BuildSnags(f));
         return root;
+    }
+
+    static bool NearTrail(FallsSpec fa, float x, float z, float r)
+    {
+        for (int j = 0; j + 1 < fa.TrailX.Length; j++)
+        {
+            float ax = fa.TrailX[j], az = fa.TrailZ[j], bx = fa.TrailX[j + 1] - ax, bz = fa.TrailZ[j + 1] - az;
+            float t = Math.Clamp(((x - ax) * bx + (z - az) * bz) / MathF.Max(1e-4f, bx * bx + bz * bz), 0f, 1f);
+            float dx = x - (ax + bx * t), dz = z - (az + bz * t);
+            if (dx * dx + dz * dz < r * r) return true;
+        }
+        return false;
     }
 
     // ---------------------------------------------------------------- snags (fallen trees in the water)

@@ -86,6 +86,8 @@ public partial class Raft : RigidBody3D
 
         RaftModel.Build(this);
         GlobalPosition = position;
+        // Floating origin: points kept in scene coordinates move with the world.
+        Origin.Shifted += d => { if (AnchorDown) AnchorPoint -= d; LoadPoint -= d; };
         Rotation = new Vector3(0, yaw, 0);
     }
 
@@ -128,6 +130,7 @@ public partial class Raft : RigidBody3D
     {
         float dt = (float)delta;
         _time += dt;
+        if (Freeze) { Grounded = false; return; }    // on the portage rollers (Portage moves it)
         var xf = GlobalTransform;
         var com = xf * CenterOfMass;
         var v = LinearVelocity;

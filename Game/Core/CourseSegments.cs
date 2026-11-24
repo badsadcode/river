@@ -97,6 +97,7 @@ public static class CourseSegments
                 case FeatureKind.Split: spec.Islands.Add(MakeIsland(c, c.RiverIndexAt(f.Mid), 0f, 55f, 100f, 13f, 2.6f, 0.2f, f.Seed, L, LDir)); break;
                 case FeatureKind.Riffle: RiffleRocks(c, f, spec, L); break;
                 case FeatureKind.Rapid: RapidRocks(c, f, spec, L); break;
+                case FeatureKind.Falls: spec.Falls = MakeFalls(c, f, L, LDir); break;
                 case FeatureKind.Confluence:
                     var (trib, edge, q) = Tributary(c, f, frame, sizeX, sizeZ, L);
                     if (trib != null) { spec.Tributary = trib; inflows.Add(new Inflow(edge, 1, q)); }
@@ -330,6 +331,50 @@ public static class CourseSegments
         }
     }
 
+    // ================================================================ waterfalls (docs/DECISIONS.md D21)
+
+    static bool FallsNear(Course c, int i)
+    {
+        foreach (var f in c.Features)
+            if (f.Kind == FeatureKind.Falls && c.Sigma[i] > f.S0 - 50.0 && c.Sigma[i] < f.S1 + 50.0) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// A waterfall: its lip across the river at the feature's lip, the landing in the slack bay 110 m above it on
+    /// the feature's side, the put-in 75 m below it, and a portage trail between them that leaves the bank, runs
+    /// downstream 28 m back from the water (past the lip, where the generator ramps it down the scarp) and comes
+    /// back to the water.
+    /// </summary>
+    static FallsSpec MakeFalls(Course c, CourseFeature f, Func<double, double, (float, float)> L, Func<double, double, (float, float)> LDir)
+    {
+        int iLip = c.RiverIndexAt(f.Lip), iLand = c.RiverIndexAt(f.Lip - 110.0), iPut = c.RiverIndexAt(f.Lip + 75.0);
+        int side = f.Side;
+        float HwSide(int i) => side > 0 ? c.HalfRight[i] : c.HalfLeft[i];
+        (float, float) At(int i, float lateral)
+        {
+            var (rx, rz) = c.RiverRight(i);
+            return L(c.X[i] + rx * side * lateral, c.Z[i] + rz * side * lateral);
+        }
+        var (lx, lz) = L(c.X[iLip], c.Z[iLip]);
+        var (dx, dz) = LDir(MathF.Sin(c.Heading[iLip]), MathF.Cos(c.Heading[iLip]));
+        var tx = new List<float>(); var tz = new List<float>();
+        void Add((float x, float z) p) { tx.Add(p.x); tz.Add(p.z); }
+        Add(At(iLand, HwSide(iLand) + 3f));
+        for (int i = iLand; i <= iPut; i += 8) Add(At(i, HwSide(i) + 28f));
+        Add(At(iPut, HwSide(iPut) + 28f));
+        Add(At(iPut, HwSide(iPut) + 3f));
+        var landing = At(iLand, HwSide(iLand) - 5f);
+        var putIn = At(iPut, HwSide(iPut) - 6f);
+        return new FallsSpec
+        {
+            LipX = lx, LipZ = lz, DirX = dx, DirZ = dz,
+            HalfWidth = MathF.Max(c.HalfLeft[iLip], c.HalfRight[iLip]), Height = f.Size, Side = side,
+            LandingX = landing.Item1, LandingZ = landing.Item2, PutInX = putIn.Item1, PutInZ = putIn.Item2,
+            TrailX = tx.ToArray(), TrailZ = tz.ToArray(),
+        };
+    }
+
     // ================================================================ tier-2 variety (docs/DECISIONS.md D17)
 
     static bool NearFeature(Course c, int i, double margin)
@@ -535,7 +580,7 @@ public static class CourseSegments
         int a = c.RiverIndexAt(c.Cuts[k] + 60.0), b = c.RiverIndexAt(c.Cuts[k + 1] - 60.0);
         for (int i = a + 7; i < b - 7; i += 15)
         {
-            if (c.ReachAt(c.Sigma[i]).Gorge > 0.5f) continue;
+            if (c.ReachAt(c.Sigma[i]).Gorge > 0.5f || FallsNear(c, i)) continue;
             float H(int j) => Noise.Hash01(i, j, seed + 9400);
             float d = c.Heading[i + 6] - c.Heading[i - 6];
             float apex = MathUtil.Clamp01(MathF.Abs(d) / 0.5f);

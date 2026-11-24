@@ -34,6 +34,15 @@ public static class ReachCache
         foreach (var c in f.SideChannels) WriteLine(w, c);
         w.Write(f.Snags.Count);
         foreach (var n in f.Snags) { w.Write(n.X); w.Write(n.Z); w.Write(n.DirX); w.Write(n.DirZ); w.Write(n.Length); w.Write(n.Radius); w.Write(n.Seed); }
+        w.Write(f.Falls != null);
+        if (f.Falls is { } fa)
+        {
+            foreach (float v in new[] { fa.LipX, fa.LipZ, fa.DirX, fa.DirZ, fa.HalfWidth, fa.Height, fa.LandingX, fa.LandingZ,
+                                        fa.PutInX, fa.PutInZ, fa.TopEta, fa.BottomEta }) w.Write(v);
+            w.Write(fa.Side);
+            w.Write(fa.TrailX.Length);
+            for (int i = 0; i < fa.TrailX.Length; i++) { w.Write(fa.TrailX[i]); w.Write(fa.TrailZ[i]); w.Write(fa.TrailH[i]); }
+        }
     }
 
     public static ReachField TryLoad(string path, string key)
@@ -76,6 +85,20 @@ public static class ReachCache
                     X = rd.ReadSingle(), Z = rd.ReadSingle(), DirX = rd.ReadSingle(), DirZ = rd.ReadSingle(),
                     Length = rd.ReadSingle(), Radius = rd.ReadSingle(), Seed = rd.ReadInt32(),
                 });
+            if (rd.ReadBoolean())
+            {
+                var fa = new FallsSpec
+                {
+                    LipX = rd.ReadSingle(), LipZ = rd.ReadSingle(), DirX = rd.ReadSingle(), DirZ = rd.ReadSingle(),
+                    HalfWidth = rd.ReadSingle(), Height = rd.ReadSingle(), LandingX = rd.ReadSingle(), LandingZ = rd.ReadSingle(),
+                    PutInX = rd.ReadSingle(), PutInZ = rd.ReadSingle(), TopEta = rd.ReadSingle(), BottomEta = rd.ReadSingle(),
+                    Side = rd.ReadInt32(),
+                };
+                int nt = rd.ReadInt32();
+                fa.TrailX = new float[nt]; fa.TrailZ = new float[nt]; fa.TrailH = new float[nt];
+                for (int i = 0; i < nt; i++) { fa.TrailX[i] = rd.ReadSingle(); fa.TrailZ[i] = rd.ReadSingle(); fa.TrailH[i] = rd.ReadSingle(); }
+                f.Falls = fa;
+            }
             return f;
         }
         catch (Exception) { return null; }

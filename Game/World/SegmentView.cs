@@ -60,6 +60,7 @@ public sealed class SegmentView
         v.Mist = env.CreateMist(f, tex);
 
         // Attach order: the (emptied) groups, then their children one by one, then the mist.
+        if (f.Falls != null) water.AddChild(FallsBuilder.Build(f));
         var groups = new Node[] { terrain, water, veg };
         var children = new List<(Node, Node)>();
         foreach (var group in groups)
