@@ -96,12 +96,12 @@ public partial class Portage : Node3D
             if (_above == fa && now - _aboveAt < 30.0 && along > 3.0 && along < 80.0 && Math.Abs(across) < fa.HalfWidth + 15.0
                 && rp.Y < fa.TopEta - 2f) { _above = null; _pinned = 0f; Wreck(fa); return; }
             // Pinned against the lip boulders at the very edge: the river drags it over in the end.
-            if (along > -8.0 && along < 3.0 && Math.Abs(across) < fa.HalfWidth + 15.0 && _raft.LinearVelocity.Length() < 0.3f)
+            if (along > -14.0 && along < 3.0 && Math.Abs(across) < fa.HalfWidth + 15.0 && _raft.LinearVelocity.Length() < 0.3f)
             {
                 _pinned += dt;
                 if (_pinned > 6f) { _above = null; _pinned = 0f; Wreck(fa); return; }
             }
-            else if (along < -8.0 && along > -300.0 && Math.Abs(across) < fa.HalfWidth + 15.0) _pinned = 0f;
+            else if (along < -14.0 && along > -300.0 && Math.Abs(across) < fa.HalfWidth + 15.0) _pinned = 0f;
 
             var head = Origin.ToScene(fa.TrailX[0], fa.TrailH[0], fa.TrailZ[0]);
             var landing = Origin.ToScene(fa.LandingX, fa.TopEta, fa.LandingZ);

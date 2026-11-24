@@ -274,24 +274,38 @@ public static class ReachGenerator
         Eddies.AddRecirculation(f, connected, lee, lineArr, nearIdx, lineOf, m => Log(m));
 
         // ------------------------------------------------------------ 7d. the waterfall's drop (D21)
-        // Below the lip (by the nearest main centre-line sample, so a perpendicular line across the river) the water
-        // stands its height lower. The plunge pool's first 24 m are churned white.
+        // Below the lip the water stands the falls' height lower. The lip isn't a ruler line across the river: it is
+        // a horseshoe (the middle cut back upstream by up to 35 % of the half-width, as falls erode) with a ragged
+        // edge (±1.5 m). Positions are measured along the main centre line (distance past the lip sample) and across
+        // it. The plunge pool's first 24 m below the lip are churned white.
         float[] fallsFoam = null;
         if (s.Falls is { } falls)
         {
             int kLip = f.Main.Nearest(falls.LipX, falls.LipZ);
             fallsFoam = new float[total];
             int below = 0;
+            float hwLip = falls.HalfWidth;
             for (int i = 0; i < total; i++)
             {
                 if (!connected[i]) continue;
+                float x = (i % nx) * s.Cell, z = (i / nx) * s.Cell;
                 int k = mainIdx[i];
-                bool isBelow = k >= 0 ? k > kLip
-                    : ((i % nx) * s.Cell - falls.LipX) * falls.DirX + ((i / nx) * s.Cell - falls.LipZ) * falls.DirZ > 0f;
-                if (!isBelow) continue;
+                float past, across;
+                if (k >= 0)
+                {
+                    past = (k - kLip) * Centerline.Step + (x - f.Main.X[k]) * f.Main.TanX[k] + (z - f.Main.Z[k]) * f.Main.TanZ[k];
+                    across = lateral[i];
+                }
+                else
+                {
+                    past = (x - falls.LipX) * falls.DirX + (z - falls.LipZ) * falls.DirZ;
+                    across = -(x - falls.LipX) * falls.DirZ + (z - falls.LipZ) * falls.DirX;
+                }
+                float lipAt = FallsSpec.LipAt(across, hwLip, falls.Height, s.Seed);
+                if (past <= lipAt) continue;
                 f.Eta[i] -= falls.Height;
                 below++;
-                if (k >= 0 && k <= kLip + 12) fallsFoam[i] = MathUtil.Smoothstep(kLip + 12, kLip + 2, k);
+                fallsFoam[i] = MathUtil.Smoothstep(24f, 4f, past - lipAt);
             }
             falls.TopEta = f.SampleEta(falls.LandingX, falls.LandingZ);
             falls.BottomEta = f.SampleEta(falls.PutInX, falls.PutInZ);
@@ -337,6 +351,7 @@ public static class ReachGenerator
             f.Eta[i] = e;
         }
         SmoothLandEta(f, connected);
+        if (f.Falls != null) SoftenScarp(f, mainIdx, lateral, s.Seed);
         Log("surface extended over land");
 
         // ------------------------------------------------------------ 8. terrain height
@@ -425,6 +440,42 @@ public static class ReachGenerator
         ComputeFoam(f, connected, s, fallsFoam);
         Log("foam");
         return f;
+    }
+
+    // ================================================================ the waterfall's scarp
+
+    /// <summary>
+    /// Land beside a waterfall: steep (a rock face) right at the water, easing with distance from it into a slope a
+    /// traveller could walk down (the land's water level ramps from the top to the bottom level over a width that
+    /// grows 0.8 m per metre from the shore), and fading out 60–150 m up- and downstream of the lip.
+    /// </summary>
+    static void SoftenScarp(ReachField f, int[] mainIdx, float[] lateral, int seed)
+    {
+        var fa = f.Falls;
+        int kLip = f.Main.Nearest(fa.LipX, fa.LipZ);
+        for (int i = 0; i < f.Eta.Length; i++)
+        {
+            if (f.Water[i]) continue;
+            float x = (i % f.Nx) * f.Cell, z = (i / f.Nx) * f.Cell;
+            int k = mainIdx[i];
+            float past, across;
+            if (k >= 0)
+            {
+                past = (k - kLip) * Centerline.Step + (x - f.Main.X[k]) * f.Main.TanX[k] + (z - f.Main.Z[k]) * f.Main.TanZ[k];
+                across = lateral[i];
+            }
+            else
+            {
+                past = (x - fa.LipX) * fa.DirX + (z - fa.LipZ) * fa.DirZ;
+                across = -(x - fa.LipX) * fa.DirZ + (z - fa.LipZ) * fa.DirX;
+            }
+            if (MathF.Abs(past) > 150f) continue;
+            float lip = FallsSpec.LipAt(across, fa.HalfWidth, fa.Height, seed);
+            float halfWidth = 1.5f + 0.8f * MathF.Max(f.ShoreDist[i], 0f);
+            float level = MathUtil.Lerp(fa.TopEta, fa.BottomEta, MathUtil.Smoothstep(lip - halfWidth, lip + halfWidth, past));
+            float w = MathUtil.Smoothstep(150f, 60f, MathF.Abs(past));
+            f.Eta[i] = MathUtil.Lerp(f.Eta[i], level, w);
+        }
     }
 
     // ================================================================ the portage trail

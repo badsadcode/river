@@ -385,7 +385,7 @@ public static class Vegetation
         return root;
     }
 
-    static ArrayMesh RockMesh(int seed, float radius)
+    internal static ArrayMesh RockMesh(int seed, float radius)
     {
         var st = new SurfaceTool();
         st.Begin(Mesh.PrimitiveType.Triangles);

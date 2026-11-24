@@ -107,6 +107,9 @@ void fragment() {
 	float bed = sin(v_world.y * 2.3 + n1 * 6.0 + n2 * 1.5);
 	float strata = 0.8 + 0.2 * bed - 0.25 * smoothstep(0.75, 0.95, n3) * smoothstep(0.6, 1.0, slope);
 	col = mix(col, rock * (0.7 + 0.45 * n2) * strata, rock_k);
+	// Rock faces next to the water (a waterfall's face, the foot of a cliff) are wet: darker and glossier.
+	float wet_rock = rock_k * (1.0 - smoothstep(1.0, 8.0, shore));
+	col *= mix(1.0, 0.5, wet_rock);
 
 	// Riverbed: sand in the shallows to dark silt in the deep.
 	float under = -above;
@@ -119,6 +122,7 @@ void fragment() {
 	float wet = 1.0 - smoothstep(0.02, 0.28 + n3 * 0.15, above);
 	col *= mix(1.0, 0.55, wet);
 	float rough = mix(0.92, 0.35, wet);
+	rough = min(rough, mix(1.0, 0.4, wet_rock));
 
 	ALBEDO = col;
 	// Under water the bed has no sun glint: sediment and water have nearly the same refractive index, so there is

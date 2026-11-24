@@ -78,4 +78,16 @@ public sealed class FallsSpec
     // Filled in by the generator:
     public float TopEta, BottomEta;             // water levels above and below the lip
     public float[] TrailH;                      // trail ground height at each polyline point
+
+    /// <summary>
+    /// Where the lip is, across the river: metres past the lip sample (negative = upstream) at <paramref name="across"/>
+    /// metres from the centre line. A horseshoe (the middle cut back by up to 35 % of the half-width) with a ragged
+    /// edge. Shared by the generator (which water drops), the lip ledges and the curtain.
+    /// </summary>
+    public static float LipAt(float across, float halfWidth, float height, int seed)
+    {
+        float recess = Math.Clamp(0.35f * halfWidth, 3f, 12f);
+        float u = Math.Clamp(across / halfWidth, -1.2f, 1.2f);
+        return -recess * MathF.Max(0f, 1f - u * u) + 1.5f * Noise.Fbm1(across / 5f + height, seed + 461, 2);
+    }
 }

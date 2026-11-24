@@ -123,7 +123,19 @@ public static class CourseSegments
             hint = idx;
             return (sigma, offset);
         };
-        spec.LevelAt = sigma => c.Eta[c.RiverIndexAt(sigma)];
+        // Far from the river the land doesn't drop at a waterfall in one step: it slopes down over ±150 m.
+        var fallsHere = new List<CourseFeature>();
+        foreach (var f in c.Features) if (f.Kind == FeatureKind.Falls && f.S1 > sa - 400.0 && f.S0 < sb + 400.0) fallsHere.Add(f);
+        spec.LevelAt = sigma =>
+        {
+            foreach (var f in fallsHere)
+                if (Math.Abs(sigma - f.Lip) < 150.0)
+                {
+                    float above = c.Eta[c.RiverIndexAt(f.Lip - 151.0)], below = c.Eta[c.RiverIndexAt(f.Lip + 151.0)];
+                    return MathUtil.Lerp(above, below, MathUtil.Smoothstep(-150f, 150f, (float)(sigma - f.Lip)));
+                }
+            return c.Eta[c.RiverIndexAt(sigma)];
+        };
         spec.GorgeAt = sigma => c.ReachAt(sigma).Gorge;
         return spec;
     }
@@ -333,19 +345,24 @@ public static class CourseSegments
 
     // ================================================================ waterfalls (docs/DECISIONS.md D21)
 
-    /// <summary>3–6 boulders standing out of the water just above a waterfall's lip: they split the curtain.</summary>
+    /// <summary>
+    /// 2–4 low rock ledges on a waterfall's lip (just breaking the surface, wide and flat-topped rather than round):
+    /// they split the curtain into separate falls. On the curved lip (FallsSpec.LipAt), a metre upstream of it.
+    /// </summary>
     static void LipRocks(Course c, CourseFeature f, SegmentSpec spec, Func<double, double, (float, float)> L)
     {
         var rng = new Rng(f.Seed + 31);
-        int i = c.RiverIndexAt(f.Lip - 1.5);
-        float hl = c.HalfLeft[i], hr = c.HalfRight[i];
-        int n = 3 + rng.Range(0, 4);
-        var (rx, rz) = c.RiverRight(i);
+        int iL = c.RiverIndexAt(f.Lip);
+        float hl = c.HalfLeft[iL], hr = c.HalfRight[iL], hw = MathF.Max(hl, hr);
+        int n = 2 + rng.Range(0, 3);
         for (int q = 0; q < n; q++)
         {
-            float lat = -hl * 0.85f + (hl + hr) * 0.85f * (q + rng.Range(0.2f, 0.8f)) / n;
+            float lat = -hl * 0.8f + (hl + hr) * 0.8f * (q + rng.Range(0.25f, 0.75f)) / n;
+            float lip = FallsSpec.LipAt(lat, hw, f.Size, c.Settings.Seed);
+            int i = c.RiverIndexAt(f.Lip + lip - 1.0);
+            var (rx, rz) = c.RiverRight(i);
             var (lx, lz) = L(c.X[i] + rx * lat, c.Z[i] + rz * lat);
-            spec.Rocks.Add(new Rock { X = lx, Z = lz, Radius = rng.Range(1.0f, 2.4f), Top = rng.Range(0.3f, 1.2f), Seed = f.Seed + 300 + q });
+            spec.Rocks.Add(new Rock { X = lx, Z = lz, Radius = rng.Range(1.6f, 2.8f), Top = rng.Range(0.12f, 0.4f), Seed = f.Seed + 300 + q });
         }
     }
 

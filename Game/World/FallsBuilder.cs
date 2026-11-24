@@ -6,9 +6,12 @@ using River.Core;
 namespace River.World;
 
 /// <summary>
-/// What a waterfall adds to its segment (grid-local, under the segment root): the falling curtain from the lip to the
-/// plunge pool, spray and drifting mist at its foot, and a post at the portage trail's head (D21). The water surface
-/// itself stops at the lip (WaterBuilder skips cells across the drop); the generator lowered the water below it.
+/// What a waterfall adds to its segment (grid-local, under the segment root), D21/D22:
+///   • the falling sheet: columns every 0.5 m along the curved, ragged lip the generator made, each with its own
+///     amount of water (full sheets, thin threads), curving over the brink and falling along a parabola;
+///   • a veil of spray just in front of it, the white churn spreading over the plunge pool, spray and a mist cloud;
+///   • a post at the portage trail's head.
+/// The water surface itself stops at the lip (WaterBuilder skips cells across the drop).
 /// </summary>
 public static class FallsBuilder
 {
@@ -16,81 +19,218 @@ public static class FallsBuilder
     {
         var fa = f.Falls;
         var root = new Node3D { Name = "Waterfall" };
-        root.AddChild(Curtain(f, fa));
+        var cols = Columns(f, fa);
+        var shader = GD.Load<Shader>("res://Game/Shaders/Falls.gdshader");
+        float drop = fa.TopEta - fa.BottomEta;
+        ShaderMaterial Mat(int mode)
+        {
+            var m = new ShaderMaterial { Shader = shader };
+            m.SetShaderParameter("drop", drop);
+            m.SetShaderParameter("mode", mode);
+            return m;
+        }
+        root.AddChild(Sheet(cols, fa, veil: false, Mat(0)));
+        root.AddChild(Sheet(cols, fa, veil: true, Mat(1)));
+        root.AddChild(Churn(cols, fa, Mat(2)));
         root.AddChild(Spray(f, fa, mist: false));
         root.AddChild(Spray(f, fa, mist: true));
         root.AddChild(TrailPost(f, fa));
+        root.AddChild(LedgeRocks(f, fa, cols));
         return root;
     }
 
     /// <summary>
-    /// The sheet: columns every 0.5 m across the lip wherever there is water just above it, each falling along
-    /// x = throw·√u, y = top − drop·u (a parabola), starting 1 m upstream of the lip line where the grid's drop is.
+    /// Rock ledges on the face beside the falls: big flattened blocks half sunk into the scarp on both banks, from the
+    /// edge of the water outward, at different heights between the pool and the brink (wet near the pool: Rock
+    /// shader). They break up the smooth slope the terrain alone would show there. Decoration only (no collision).
     /// </summary>
-    static MeshInstance3D Curtain(ReachField f, FallsSpec fa)
+    static Node3D LedgeRocks(ReachField f, FallsSpec fa, List<Column> cols)
     {
-        float ax = -fa.DirZ, az = fa.DirX;                    // across the river
+        var root = new Node3D { Name = "LedgeRocks" };
+        if (cols.Count == 0) return root;
         float drop = fa.TopEta - fa.BottomEta;
-        float throwDist = 1.2f + 0.12f * drop;
-        const int rows = 16;
-        var verts = new List<Vector3>(); var uvs = new List<Vector2>(); var idx = new List<int>();
-        var cols = new List<float>();
+        float ax = -fa.DirZ, az = fa.DirX;
+        var mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://Game/Shaders/Rock.gdshader") };
+        var rng = new Rng(f.Seed + 811);
+        float yaw = MathF.Atan2(fa.DirX, fa.DirZ);
+        float co = MathF.Cos(f.Frame.Heading), si = MathF.Sin(f.Frame.Heading);
+        var wdir = new Vector2(fa.DirX * co + fa.DirZ * si, -fa.DirX * si + fa.DirZ * co);
+        void Place(float across, float lipS)
+        {
+            float r = rng.Range(1.2f, 2.6f);
+            float y = fa.BottomEta + drop * rng.Range(0.05f, 0.85f);
+            // On the face: a little downstream of the lip line, more so lower down (the face leans back).
+            float s = lipS + rng.Range(-0.5f, 1.5f);
+            var pos = new Vector3(fa.LipX + ax * across + fa.DirX * s, y, fa.LipZ + az * across + fa.DirZ * s);
+            var mi = new MeshInstance3D
+            {
+                Mesh = Vegetation.RockMesh(f.Seed + 900 + rng.Range(0, 100000), r), MaterialOverride = mat, Position = pos,
+                Rotation = new Vector3(rng.Range(-0.2f, 0.2f), yaw + rng.Range(-0.5f, 0.5f), rng.Range(-0.15f, 0.15f)),
+                Scale = new Vector3(rng.Range(1.1f, 1.6f), rng.Range(0.55f, 0.8f), rng.Range(0.9f, 1.3f)),
+            };
+            mi.SetInstanceShaderParameter("water_level", fa.BottomEta);
+            mi.SetInstanceShaderParameter("flow", new Vector4(wdir.X, wdir.Y, 0.4f, r));
+            root.AddChild(mi);
+        }
+        // From each edge of the falls outward along the lip line, 16 m into the banks.
+        float minC = cols[0].Across, maxC = cols[^1].Across;
+        float LipS(float across) => FallsSpec.LipAt(across, fa.HalfWidth, fa.Height, f.Seed);
+        for (float d = 0.5f; d < 16f; d += rng.Range(1.8f, 3.2f))
+        {
+            Place(minC - d, LipS(minC - d));
+            Place(maxC + d, LipS(maxC + d));
+            if (rng.Next01() < 0.5f) { Place(minC - d, LipS(minC - d)); Place(maxC + d, LipS(maxC + d)); }
+        }
+        // And at the foot of the face between separate falls (where the lip ledges split them).
+        for (int i = 1; i < cols.Count; i++)
+            if (cols[i].Across - cols[i - 1].Across > 1.5f)
+                for (float c = cols[i - 1].Across + 0.8f; c < cols[i].Across - 0.5f; c += 1.6f) Place(c, LipS(c));
+        return root;
+    }
+
+    /// <summary>One strip of falling water: where it leaves the lip, which way it goes, how much water it carries.</summary>
+    struct Column
+    {
+        public float Across;        // metres from the centre line
+        public Vector3 Lip;         // where the water leaves the edge (grid-local, at the top water level)
+        public Vector3 Dir;         // horizontal, downstream at the lip
+        public float Amount;        // 0.25 (threads) … 1 (a full sheet)
+        public float Seed;
+    }
+
+    /// <summary>
+    /// Columns every 0.5 m across the river: for each, march along the flow until the water surface drops (the lip,
+    /// curved and ragged as the generator made it); none where a lip ledge stands or there is no water above. Each
+    /// gets its own amount of water (slow noise across: full sheets here, thin threads there).
+    /// </summary>
+    static List<Column> Columns(ReachField f, FallsSpec fa)
+    {
+        var cols = new List<Column>();
+        float ax = -fa.DirZ, az = fa.DirX;
+        float drop = fa.TopEta - fa.BottomEta;
         float reach = fa.HalfWidth * 1.6f + 10f;
         for (float c = -reach; c <= reach; c += 0.5f)
         {
-            float px = fa.LipX + ax * c - fa.DirX * 1.5f, pz = fa.LipZ + az * c - fa.DirZ * 1.5f;
-            if (!f.InDomain(px, pz) || f.SampleDepth(px, pz) < 0.15f) continue;
-            // Boulders on the lip split the sheet.
-            float qx = fa.LipX + ax * c, qz = fa.LipZ + az * c;
+            float bx = fa.LipX + ax * c, bz = fa.LipZ + az * c;
+            float lipS = float.NaN;
+            for (float t = -18f; t <= 10f; t += 0.25f)
+            {
+                float px = bx + fa.DirX * t, pz = bz + fa.DirZ * t;
+                if (!f.InDomain(px, pz)) break;
+                if (f.SampleEta(px, pz) < fa.TopEta - 0.5f * drop) { lipS = t - 0.25f; break; }
+            }
+            if (float.IsNaN(lipS)) continue;
+            float lx = bx + fa.DirX * lipS, lz = bz + fa.DirZ * lipS;
+            if (f.SampleDepth(lx - fa.DirX * 1.5f, lz - fa.DirZ * 1.5f) < 0.15f) continue;
             bool rock = false;
             foreach (var r in f.Rocks)
-                if ((r.X - qx) * (r.X - qx) + (r.Z - qz) * (r.Z - qz) < (r.Radius * 0.9f) * (r.Radius * 0.9f)) { rock = true; break; }
+                if ((r.X - lx) * (r.X - lx) + (r.Z - lz) * (r.Z - lz) < (r.Radius * 0.85f) * (r.Radius * 0.85f)) { rock = true; break; }
             if (rock) continue;
-            cols.Add(c);
+            float amount = Math.Clamp(0.55f + 0.75f * River.Core.Noise.Fbm1(c / 4.5f, f.Seed + 77, 2), 0.25f, 1f);
+            cols.Add(new Column
+            {
+                Across = c, Lip = new Vector3(lx, fa.TopEta + 0.03f, lz), Dir = new Vector3(fa.DirX, 0f, fa.DirZ),
+                Amount = amount, Seed = River.Core.Noise.Hash01((int)MathF.Round(c * 2f), 3, f.Seed + 79),
+            });
         }
-        int prev = -1; float prevC = float.NaN;
-        foreach (float c in cols)
+        return cols;
+    }
+
+    const int Rows = 22;
+
+    static float Throw(in Column col, float drop) => (0.5f + 1.6f * col.Amount) * (1f + 0.08f * drop);
+
+    /// <summary>
+    /// The falling sheet (or the veil of spray just in front of it). From 0.8 m upstream of the edge the surface curves
+    /// over (the brink), then each column falls along a parabola: fuller columns are thrown further out, thin ones
+    /// cling closer to the rock. Columns join into a sheet where their lips are close; gaps where they aren't.
+    /// COLOR: r = amount, g = seed.
+    /// </summary>
+    static MeshInstance3D Sheet(List<Column> cols, FallsSpec fa, bool veil, ShaderMaterial mat)
+    {
+        float drop = fa.TopEta - fa.BottomEta;
+        var verts = new List<Vector3>(); var uvs = new List<Vector2>(); var colors = new List<Color>(); var idx = new List<int>();
+        int prev = -1; Vector3 prevLip = default; float prevC = float.NaN;
+        foreach (var col in cols)
         {
             int start = verts.Count;
-            // Each part of the sheet falls a little differently: more or less water, a ragged lip.
-            float vary = River.Core.Noise.Fbm1(c * 0.21f, f.Seed + 77, 2);
-            float th = throwDist * (1f + 0.35f * vary), lipOff = 0.25f * River.Core.Noise.Fbm1(c * 0.6f, f.Seed + 78, 2);
-            for (int r = 0; r <= rows; r++)
+            float th = Throw(col, drop);
+            float out0 = veil ? 0.25f + 0.35f * col.Amount : 0f;
+            for (int r = 0; r <= Rows; r++)
             {
-                float u = r / (float)rows;
-                float fwd = 1.0f + lipOff + th * MathF.Sqrt(u);
-                float y = fa.TopEta + 0.04f - (drop + 0.35f) * u;
-                verts.Add(new Vector3(fa.LipX + ax * c + fa.DirX * fwd, y, fa.LipZ + az * c + fa.DirZ * fwd));
-                uvs.Add(new Vector2(c, u));
+                float u = r / (float)Rows;
+                float brink = MathUtil.Smoothstep(0.12f, 0f, u);
+                float fwd = -0.8f * brink + th * MathF.Sqrt(u) + out0 * MathUtil.Smoothstep(0.05f, 0.4f, u) * (1f + u);
+                // Slower at first (the water leaves the edge horizontally), then falling.
+                float fall = (drop + 0.4f) * (0.35f * u * u + 0.65f * u);
+                verts.Add(col.Lip + col.Dir * fwd + new Vector3(0f, -fall, 0f));
+                uvs.Add(new Vector2(col.Across, u));
+                colors.Add(new Color(col.Amount, col.Seed, veil ? 1f : 0f));
             }
-            if (prev >= 0 && MathF.Abs(c - prevC) < 0.75f)
-                for (int r = 0; r < rows; r++)
+            if (prev >= 0 && MathF.Abs(col.Across - prevC) < 0.75f && col.Lip.DistanceTo(prevLip) < 1.4f)
+                for (int r = 0; r < Rows; r++)
                 {
                     int a = prev + r, b = start + r, d = start + r + 1, e = prev + r + 1;
                     idx.Add(a); idx.Add(b); idx.Add(d); idx.Add(a); idx.Add(d); idx.Add(e);
                 }
-            prev = start; prevC = c;
+            prev = start; prevLip = col.Lip; prevC = col.Across;
         }
-        var mi = new MeshInstance3D { Name = "Curtain", CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+        return MeshOf(veil ? "Veil" : "Curtain", verts, uvs, colors, idx, mat);
+    }
+
+    /// <summary>
+    /// The churn at the foot: a skirt on the plunge pool from just behind where each column lands to 9 m beyond it,
+    /// the falling water's white boil spreading out and thinning (COLOR: r = amount).
+    /// </summary>
+    static MeshInstance3D Churn(List<Column> cols, FallsSpec fa, ShaderMaterial mat)
+    {
+        float drop = fa.TopEta - fa.BottomEta;
+        var verts = new List<Vector3>(); var uvs = new List<Vector2>(); var colors = new List<Color>(); var idx = new List<int>();
+        const int rings = 6;
+        int prev = -1; Vector3 prevLip = default; float prevC = float.NaN;
+        foreach (var col in cols)
+        {
+            int start = verts.Count;
+            float th = Throw(col, drop);
+            for (int r = 0; r <= rings; r++)
+            {
+                float d = r / (float)rings;
+                var p = col.Lip + col.Dir * (th - 0.6f + 9.5f * d);
+                verts.Add(new Vector3(p.X, fa.BottomEta + 0.07f, p.Z));
+                uvs.Add(new Vector2(col.Across, d));
+                colors.Add(new Color(col.Amount, col.Seed, 0f));
+            }
+            if (prev >= 0 && MathF.Abs(col.Across - prevC) < 0.75f && col.Lip.DistanceTo(prevLip) < 2.5f)
+                for (int r = 0; r < rings; r++)
+                {
+                    int a = prev + r, b = start + r, d = start + r + 1, e = prev + r + 1;
+                    idx.Add(a); idx.Add(b); idx.Add(d); idx.Add(a); idx.Add(d); idx.Add(e);
+                }
+            prev = start; prevLip = col.Lip; prevC = col.Across;
+        }
+        return MeshOf("Churn", verts, uvs, colors, idx, mat);
+    }
+
+    static MeshInstance3D MeshOf(string name, List<Vector3> verts, List<Vector2> uvs, List<Color> colors, List<int> idx, ShaderMaterial mat)
+    {
+        var mi = new MeshInstance3D { Name = name, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, MaterialOverride = mat };
         if (idx.Count == 0) return mi;
         var arrays = new Godot.Collections.Array();
         arrays.Resize((int)Mesh.ArrayType.Max);
         arrays[(int)Mesh.ArrayType.Vertex] = verts.ToArray();
         arrays[(int)Mesh.ArrayType.TexUV] = uvs.ToArray();
+        arrays[(int)Mesh.ArrayType.Color] = colors.ToArray();
         arrays[(int)Mesh.ArrayType.Index] = idx.ToArray();
-        var st = new SurfaceTool();
         var mesh = new ArrayMesh();
         mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+        var st = new SurfaceTool();
         st.CreateFrom(mesh, 0);
         st.GenerateNormals();
-        var mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://Game/Shaders/Falls.gdshader") };
-        mat.SetShaderParameter("drop", drop);
         mi.Mesh = st.Commit();
-        mi.MaterialOverride = mat;
         return mi;
     }
 
-    /// <summary>Spray at the foot of the falls (fast droplets) or the drifting mist cloud above the pool (slow, large).</summary>
+    /// <summary>Spray at the foot of the falls (fast droplets) or the billowing mist cloud above the pool (slow, large).</summary>
     static GpuParticles3D Spray(ReachField f, FallsSpec fa, bool mist)
     {
         float drop = fa.TopEta - fa.BottomEta;
@@ -100,13 +240,13 @@ public static class FallsBuilder
         var pm = new ParticleProcessMaterial
         {
             EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Box,
-            EmissionBoxExtents = new Vector3(fa.HalfWidth * 1.1f, 0.3f, 2f),
+            EmissionBoxExtents = new Vector3(fa.HalfWidth * 1.1f, 0.3f, mist ? 4f : 2f),
             Direction = new Vector3(wdx * 0.5f, 1f, wdz * 0.5f).Normalized(),
             Spread = mist ? 50f : 35f,
             InitialVelocityMin = mist ? 0.6f : 2f + 0.25f * drop,
-            InitialVelocityMax = mist ? 1.6f : 4f + 0.4f * drop,
-            Gravity = mist ? new Vector3(wdx * 0.4f, 0.15f, wdz * 0.4f) : new Vector3(wdx * 1.5f, -6f, wdz * 1.5f),
-            ScaleMin = mist ? 0.7f : 0.5f, ScaleMax = mist ? 1.6f : 1.4f,
+            InitialVelocityMax = mist ? 1.8f : 4f + 0.4f * drop,
+            Gravity = mist ? new Vector3(wdx * 0.4f, 0.2f, wdz * 0.4f) : new Vector3(wdx * 1.5f, -6f, wdz * 1.5f),
+            ScaleMin = mist ? 0.7f : 0.5f, ScaleMax = mist ? 1.8f : 1.4f,
             ColorRamp = new GradientTexture1D
             {
                 Gradient = new Gradient
@@ -123,10 +263,10 @@ public static class FallsBuilder
         return new GpuParticles3D
         {
             Name = mist ? "FallsMist" : "FallsSpray",
-            Amount = mist ? 140 : 320,
-            Lifetime = mist ? 5f : 1.4f,
+            Amount = mist ? 220 : 420,
+            Lifetime = mist ? 7f : 1.6f,
             ProcessMaterial = pm,
-            DrawPass1 = new QuadMesh { Size = mist ? new Vector2(6f, 6f) : new Vector2(0.35f, 0.35f), Material = SprayMaterial() },
+            DrawPass1 = new QuadMesh { Size = mist ? new Vector2(8f, 8f) : new Vector2(0.4f, 0.4f), Material = SprayMaterial() },
             Position = new Vector3(fa.LipX + fa.DirX * 3.5f, fa.BottomEta + 0.2f, fa.LipZ + fa.DirZ * 3.5f),
             Rotation = new Vector3(0f, yaw, 0f),
             VisibilityAabb = new Aabb(new Vector3(-60, -5, -60), new Vector3(120, 40, 120)),
@@ -157,7 +297,7 @@ public static class FallsBuilder
             AlbedoColor = new Color(0.94f, 0.96f, 0.97f),
             AlbedoTexture = ImageTexture.CreateFromImage(img),
             Roughness = 1f,
-            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            // Lit (not unshaded): at dusk the mist must darken with everything else.
         };
     }
 

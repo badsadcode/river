@@ -283,3 +283,19 @@ at the landing, since there is no survival yet).
 - Fixed on the way: the raft's anchor point now moves with floating-origin shifts.
 - Not yet: lining the raft down with ropes, sound, a proper waterfall pool as a "secret place", tuning the look
   (whiter churn at the foot; the lip boulders sit a bit like eggs).
+
+## D22 — Waterfalls, second look (Tom: "the river is gorgeous, the waterfalls not so much")
+- **Lip**: a horseshoe (middle cut back by up to 35 % of the half-width, 3–12 m) with a ragged edge (±1.5 m):
+  `FallsSpec.LipAt`, shared by the generator (which water drops), the lip ledges and the curtain. Lip "boulders" are
+  now 2–4 wide, low ledges just breaking the surface.
+- **Sheet**: columns every 0.5 m follow the actual lip; each carries its own amount of water (threads … full sheet,
+  slow noise across); a brink curving over from 0.8 m upstream; a parabola thrown further for fuller columns; a glassy
+  dark tongue at the top tearing into white streamers that race down and stretch as they speed up; thin columns break
+  into threads; the sheet bulges with slow waves. A thin veil of spray in front.
+- **Foot**: a heaving white churn spreading 9 m over the pool; more spray and a larger mist cloud, now lit (unshaded
+  mist glowed at dusk).
+- **Rock and land**: large flattened rock ledges sunk into the face beside the falls and between them (Rock shader:
+  wet at the bottom); steep rock next to water is darker and glossier (wet) everywhere. The land no longer steps down
+  across the valley at the lip: the drop is a rock face at the water, easing 0.8 m per metre from the shore into a
+  walkable slope (`ReachGenerator.SoftenScarp`), and far from the river `LevelAt` ramps over ±150 m.
+- Portage still passes (233 s of pushing, afloat 0.3 m from the put-in).
