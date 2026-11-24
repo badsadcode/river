@@ -354,7 +354,7 @@ public static class CourseSegments
         var rng = new Rng(f.Seed + 31);
         int iL = c.RiverIndexAt(f.Lip);
         float hl = c.HalfLeft[iL], hr = c.HalfRight[iL], hw = MathF.Max(hl, hr);
-        int n = 2 + rng.Range(0, 3);
+        int n = 1 + rng.Range(0, 3);
         for (int q = 0; q < n; q++)
         {
             float lat = -hl * 0.8f + (hl + hr) * 0.8f * (q + rng.Range(0.25f, 0.75f)) / n;
@@ -362,7 +362,7 @@ public static class CourseSegments
             int i = c.RiverIndexAt(f.Lip + lip - 1.0);
             var (rx, rz) = c.RiverRight(i);
             var (lx, lz) = L(c.X[i] + rx * lat, c.Z[i] + rz * lat);
-            spec.Rocks.Add(new Rock { X = lx, Z = lz, Radius = rng.Range(1.6f, 2.8f), Top = rng.Range(0.12f, 0.4f), Seed = f.Seed + 300 + q });
+            spec.Rocks.Add(new Rock { X = lx, Z = lz, Radius = rng.Range(1.1f, 1.9f), Top = rng.Range(0.05f, 0.22f), Seed = f.Seed + 300 + q });
         }
     }
 

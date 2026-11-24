@@ -31,7 +31,6 @@ public static class FallsBuilder
         }
         root.AddChild(Sheet(cols, fa, veil: false, Mat(0)));
         root.AddChild(Sheet(cols, fa, veil: true, Mat(1)));
-        root.AddChild(Churn(cols, fa, Mat(2)));
         root.AddChild(Spray(f, fa, mist: false));
         root.AddChild(Spray(f, fa, mist: true));
         root.AddChild(TrailPost(f, fa));
@@ -109,6 +108,7 @@ public static class FallsBuilder
         float ax = -fa.DirZ, az = fa.DirX;
         float drop = fa.TopEta - fa.BottomEta;
         float reach = fa.HalfWidth * 1.6f + 10f;
+        var raw = new List<(float c, float s)>();
         for (float c = -reach; c <= reach; c += 0.5f)
         {
             float bx = fa.LipX + ax * c, bz = fa.LipZ + az * c;
@@ -120,6 +120,17 @@ public static class FallsBuilder
                 if (f.SampleEta(px, pz) < fa.TopEta - 0.5f * drop) { lipS = t - 0.25f; break; }
             }
             if (float.IsNaN(lipS)) continue;
+            raw.Add((c, lipS));
+        }
+        // Neighbouring columns leave the edge at nearly the same place: smooth the ragged lip over ±1.5 m, or the
+        // strips between them twist into folded ribbons.
+        for (int q = 0; q < raw.Count; q++)
+        {
+            float c = raw[q].c, sum = 0f; int n = 0;
+            for (int o = Math.Max(0, q - 5); o <= Math.Min(raw.Count - 1, q + 5); o++)
+                if (MathF.Abs(raw[o].c - c) < 2.6f) { sum += raw[o].s; n++; }
+            float lipS = sum / n;
+            float bx = fa.LipX + ax * c, bz = fa.LipZ + az * c;
             float lx = bx + fa.DirX * lipS, lz = bz + fa.DirZ * lipS;
             if (f.SampleDepth(lx - fa.DirX * 1.5f, lz - fa.DirZ * 1.5f) < 0.15f) continue;
             bool rock = false;
@@ -129,7 +140,11 @@ public static class FallsBuilder
             float amount = Math.Clamp(0.55f + 0.75f * River.Core.Noise.Fbm1(c / 4.5f, f.Seed + 77, 2), 0.25f, 1f);
             cols.Add(new Column
             {
-                Across = c, Lip = new Vector3(lx, fa.TopEta + 0.03f, lz), Dir = new Vector3(fa.DirX, 0f, fa.DirZ),
+                // The top follows the water at the brink (drawn down there), tucked 2 cm under it: no raised band.
+                // (Read 2.5 m upstream and never below the pool above: just at the edge the sample can fall into the
+                // pool below and the strip would start metres too low.)
+                Across = c, Lip = new Vector3(lx, MathF.Max(f.SampleEta(lx - fa.DirX * 2.5f, lz - fa.DirZ * 2.5f), fa.TopEta - 0.4f) - 0.02f, lz),
+                Dir = new Vector3(fa.DirX, 0f, fa.DirZ),
                 Amount = amount, Seed = River.Core.Noise.Hash01((int)MathF.Round(c * 2f), 3, f.Seed + 79),
             });
         }
@@ -160,14 +175,16 @@ public static class FallsBuilder
             {
                 float u = r / (float)Rows;
                 float brink = MathUtil.Smoothstep(0.12f, 0f, u);
-                float fwd = -0.8f * brink + th * MathF.Sqrt(u) + out0 * MathUtil.Smoothstep(0.05f, 0.4f, u) * (1f + u);
+                // (The brink starts 1.5 m upstream, under the river surface's last cells: no gap between them.)
+                float fwd = -1.5f * brink + th * MathF.Sqrt(u) + out0 * MathUtil.Smoothstep(0.05f, 0.4f, u) * (1f + u);
                 // Slower at first (the water leaves the edge horizontally), then falling.
-                float fall = (drop + 0.4f) * (0.35f * u * u + 0.65f * u);
+                float fall = (col.Lip.Y - fa.BottomEta + 0.4f) * (0.35f * u * u + 0.65f * u);
                 verts.Add(col.Lip + col.Dir * fwd + new Vector3(0f, -fall, 0f));
                 uvs.Add(new Vector2(col.Across, u));
                 colors.Add(new Color(col.Amount, col.Seed, veil ? 1f : 0f));
             }
-            if (prev >= 0 && MathF.Abs(col.Across - prevC) < 0.75f && col.Lip.DistanceTo(prevLip) < 1.4f)
+            // Side by side columns always join (gaps only where a ledge stands between them).
+            if (prev >= 0 && MathF.Abs(col.Across - prevC) < 0.75f && col.Lip.DistanceTo(prevLip) < 3f)
                 for (int r = 0; r < Rows; r++)
                 {
                     int a = prev + r, b = start + r, d = start + r + 1, e = prev + r + 1;
@@ -246,14 +263,17 @@ public static class FallsBuilder
             InitialVelocityMin = mist ? 0.6f : 2f + 0.25f * drop,
             InitialVelocityMax = mist ? 1.8f : 4f + 0.4f * drop,
             Gravity = mist ? new Vector3(wdx * 0.4f, 0.2f, wdz * 0.4f) : new Vector3(wdx * 1.5f, -6f, wdz * 1.5f),
-            ScaleMin = mist ? 0.7f : 0.5f, ScaleMax = mist ? 1.8f : 1.4f,
+            ScaleMin = mist ? 0.6f : 0.5f, ScaleMax = mist ? 2.0f : 1.4f,
+            // Each puff turned at random and turning slowly: the cloudy texture never lines up.
+            AngleMin = -180f, AngleMax = 180f,
+            AngularVelocityMin = mist ? -12f : 0f, AngularVelocityMax = mist ? 12f : 0f,
             ColorRamp = new GradientTexture1D
             {
                 Gradient = new Gradient
                 {
                     Offsets = new[] { 0f, 0.2f, 1f },
                     Colors = mist
-                        ? new[] { new Color(1, 1, 1, 0f), new Color(1, 1, 1, 0.3f), new Color(1, 1, 1, 0f) }
+                        ? new[] { new Color(1, 1, 1, 0f), new Color(1, 1, 1, 0.2f), new Color(1, 1, 1, 0f) }
                         : new[] { new Color(1, 1, 1, 0f), new Color(1, 1, 1, 0.8f), new Color(1, 1, 1, 0f) },
                 },
             },
@@ -266,12 +286,45 @@ public static class FallsBuilder
             Amount = mist ? 220 : 420,
             Lifetime = mist ? 7f : 1.6f,
             ProcessMaterial = pm,
-            DrawPass1 = new QuadMesh { Size = mist ? new Vector2(8f, 8f) : new Vector2(0.4f, 0.4f), Material = SprayMaterial() },
+            DrawPass1 = new QuadMesh { Size = mist ? new Vector2(8f, 8f) : new Vector2(0.4f, 0.4f), Material = mist ? MistMaterial() : SprayMaterial() },
             Position = new Vector3(fa.LipX + fa.DirX * 3.5f, fa.BottomEta + 0.2f, fa.LipZ + fa.DirZ * 3.5f),
             Rotation = new Vector3(0f, yaw, 0f),
             VisibilityAabb = new Aabb(new Vector3(-60, -5, -60), new Vector3(120, 40, 120)),
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
             Randomness = 0.6f,
+        };
+    }
+
+    static StandardMaterial3D _mist;
+
+    /// <summary>
+    /// The mist's puffs: a soft blob with cloudy noise inside it (fbm, gently contrasted), so the cloud billows
+    /// unevenly instead of being a uniform haze. Built once, 128 px.
+    /// </summary>
+    static StandardMaterial3D MistMaterial()
+    {
+        if (_mist != null) return _mist;
+        const int n = 128;
+        var img = Image.CreateEmpty(n, n, true, Image.Format.Rgba8);
+        for (int y = 0; y < n; y++)
+            for (int x = 0; x < n; x++)
+            {
+                float u = (x + 0.5f) / n * 2f - 1f, v = (y + 0.5f) / n * 2f - 1f;
+                float r = MathF.Sqrt(u * u + v * v);
+                float cloud = 0.5f + 0.5f * River.Core.Noise.Fbm(u * 2.2f + 5f, v * 2.2f + 3f, 4711, 4);
+                float a = MathUtil.Smoothstep(1f, 0.25f, r) * MathUtil.Smoothstep(0.25f, 0.75f, cloud);
+                img.SetPixel(x, y, new Color(1, 1, 1, a));
+            }
+        img.GenerateMipmaps();
+        return _mist = new StandardMaterial3D
+        {
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            BillboardMode = BaseMaterial3D.BillboardModeEnum.Particles,
+            ParticlesAnimHFrames = 1, ParticlesAnimVFrames = 1,
+            VertexColorUseAsAlbedo = true,
+            AlbedoColor = new Color(0.93f, 0.95f, 0.96f),
+            AlbedoTexture = ImageTexture.CreateFromImage(img),
+            Roughness = 1f,
         };
     }
 

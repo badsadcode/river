@@ -302,10 +302,25 @@ public static class ReachGenerator
                     across = -(x - falls.LipX) * falls.DirZ + (z - falls.LipZ) * falls.DirX;
                 }
                 float lipAt = FallsSpec.LipAt(across, hwLip, falls.Height, s.Seed);
-                if (past <= lipAt) continue;
+                if (past <= lipAt)
+                {
+                    // The approach: over the last 30 m the water speeds up towards the edge (up to ×3 at the brink),
+                    // the surface draws down (up to 0.35 m) and curves over; the shader roughens it with the speed.
+                    float a = MathUtil.Smoothstep(30f, 0f, lipAt - past);
+                    if (a > 0f)
+                    {
+                        float boost = 1f + 2f * a * a;
+                        f.VelX[i] *= boost; f.VelZ[i] *= boost;
+                        float sp = MathF.Sqrt(f.VelX[i] * f.VelX[i] + f.VelZ[i] * f.VelZ[i]);
+                        if (sp > 3.5f) { f.VelX[i] *= 3.5f / sp; f.VelZ[i] *= 3.5f / sp; }
+                        f.Eta[i] -= 0.35f * a * a * a;
+                    }
+                    continue;
+                }
                 f.Eta[i] -= falls.Height;
                 below++;
-                fallsFoam[i] = MathUtil.Smoothstep(24f, 4f, past - lipAt);
+                // The foot: churned white for the first 12 m, fading by 30 m.
+                fallsFoam[i] = 0.8f * MathUtil.Smoothstep(30f, 12f, past - lipAt);   // (below the shader's solid-white threshold)
             }
             falls.TopEta = f.SampleEta(falls.LandingX, falls.LandingZ);
             falls.BottomEta = f.SampleEta(falls.PutInX, falls.PutInZ);

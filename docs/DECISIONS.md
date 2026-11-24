@@ -299,3 +299,12 @@ at the landing, since there is no survival yet).
   across the valley at the lip: the drop is a rock face at the water, easing 0.8 m per metre from the shore into a
   walkable slope (`ReachGenerator.SoftenScarp`), and far from the river `LevelAt` ramps over ±150 m.
 - Portage still passes (233 s of pushing, afloat 0.3 m from the put-in).
+- **Third look** (Tom's close-up screenshots: folded ribbons, a carpet-like churn, a smooth paper curtain; "the closer
+  to the edge, the faster and more turbulent"): the churn skirt is gone (the river surface churns white itself, foam
+  capped at 0.8 so it stays broken foam, not a solid patch); the lip's raggedness halved (±0.7 m) and the columns'
+  edges smoothed over ±2.5 m, each strip starting at the pool's level read 2.5 m upstream (just at the edge the sample
+  could fall into the pool below: strips started metres low, a sawtooth top); river-surface cells dipping > 0.3 m
+  aren't drawn (a half-over cell sagged into a dark band); hair-fine fast streaks and see-through gaps in the sheet;
+  lip ledges fewer, smaller, lower; mist puffs have a cloudy noise texture and random slow rotation. **Approach**: over
+  the last 30 m above the lip the current speeds up to ×3 (≤ 3.5 m/s), the surface draws down by up to 0.35 m, and
+  the shader roughens it with the speed. Shots `falls_brink`, `falls_close`.

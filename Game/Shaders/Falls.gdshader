@@ -33,7 +33,7 @@ void vertex() {
 		// down it), more so lower down and in fuller columns.
 		float s = UV.y * drop;
 		float wob = sin(UV.x * 0.9 + s * 0.8 - TIME * 3.2 + COLOR.g * 6.0) * 0.6 + sin(UV.x * 2.3 - s * 1.3 - TIME * 4.7) * 0.4;
-		VERTEX += NORMAL * wob * (0.06 + 0.22 * UV.y) * (0.4 + 0.6 * COLOR.r);
+		VERTEX += NORMAL * wob * (0.22 * UV.y) * smoothstep(0.08, 0.3, UV.y) * (0.4 + 0.6 * COLOR.r);
 	}
 	if (mode == 2) {
 		// The boil heaves.
@@ -65,7 +65,9 @@ void fragment() {
 		float y2 = sqrt(s + 0.4) * 4.6 - TIME * 5.5;
 		float big = fbm(vec2(across * 0.9 + seed * 7.0, y1));
 		float fine = fbm(vec2(across * 3.8 + seed * 13.0, y2));
-		float streak = big * 0.6 + fine * 0.4;
+		// Hair-fine streaks (a few cm across), racing faster: what the eye reads as falling water up close.
+		float hair = vnoise(vec2(across * 11.0 + seed * 31.0, sqrt(s + 0.4) * 9.0 - TIME * 9.0));
+		float streak = big * 0.45 + fine * 0.35 + hair * 0.2;
 		// Glassy tongue: full columns stay smooth further down.
 		float glass = 1.0 - smoothstep(0.03, 0.12 + 0.22 * amount, down);
 		float white = (1.0 - glass) * clamp(smoothstep(0.35, 0.7, streak + 0.35 * down + 0.15 * (1.0 - amount)), 0.0, 1.0);
@@ -85,6 +87,9 @@ void fragment() {
 			float threads = smoothstep(0.62 - 0.5 * amount, 0.8 - 0.45 * amount, streak + 0.12 * (1.0 - down));
 			float body = mix(threads, 1.0, smoothstep(0.75, 1.0, amount));
 			float a = mix(0.82, 0.96, white) * mix(1.0, body, smoothstep(0.08, 0.3, down));
+			// See-through between the strands lower down: the dark wet rock shows behind.
+			a *= mix(1.0, 0.45 + 0.55 * smoothstep(0.25, 0.75, hair * 0.6 + fine * 0.4), smoothstep(0.2, 0.6, down) * (1.1 - amount));
+			ALBEDO *= mix(0.86, 1.0, hair);
 			// Soft top and bottom edges (into the river above and the churn below).
 			a *= smoothstep(0.0, 0.03, down) * (1.0 - smoothstep(0.93, 1.0, down) * 0.6);
 			ALPHA = clamp(a, 0.0, 0.98);

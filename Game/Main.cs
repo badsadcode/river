@@ -437,6 +437,22 @@ public partial class Main : Node3D
                                    OnWater(best.X + dx * 0.8f, best.Z + dz * 0.8f, 0f));
                 break;
             }
+            case "falls_brink":
+            {
+                // Just above the edge, looking over it (as from a raft that came too close).
+                if (FindFeature(FeatureKind.Falls) is not { } f) break;
+                var up = At(f.Lip - 22.0); var down = At(f.Lip + 14.0);
+                FlyCam.LookAtPoint(OnWater(up.x + up.rx * 6.0, up.z + up.rz * 6.0, 4.5f), OnWater(down.x, down.z, -1f));
+                break;
+            }
+            case "falls_close":
+            {
+                // In the plunge pool, close in front of the falling water.
+                if (FindFeature(FeatureKind.Falls) is not { } f) break;
+                var p = At(f.Lip + 16.0); var lip = At(f.Lip - 6.0);
+                FlyCam.LookAtPoint(OnWater(p.x + p.rx * 4.0, p.z + p.rz * 4.0, 1.6f), OnWater(lip.x, lip.z, -3f));
+                break;
+            }
             case "falls":
             case "falls_top":
             {

@@ -99,7 +99,7 @@ public static class WaterBuilder
                         {
                             float lo = MathF.Min(MathF.Min(verts[a].Y, verts[b].Y), MathF.Min(verts[c].Y, verts[d].Y));
                             float hi = MathF.Max(MathF.Max(verts[a].Y, verts[b].Y), MathF.Max(verts[c].Y, verts[d].Y));
-                            if (hi - lo > 1f) continue;
+                            if (hi - lo > 0.3f) continue;   // (a cell half over the edge would sag into a dark band)
                         }
                         idx.Add(a); idx.Add(b); idx.Add(d); idx.Add(a); idx.Add(d); idx.Add(c);
                     }
