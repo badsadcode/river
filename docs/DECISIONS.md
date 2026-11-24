@@ -330,3 +330,11 @@ at the landing, since there is no survival yet).
   the pool over it, and over the spray and mist. Now the sheet writes depth (`depth_draw_always`) and the order is
   sheet 0, river 1, spray and mist 2, veil 3. Spray and mist also at the brink (fine droplets thrown off the edge, a
   thin mist lying over it). Shot `falls_over`.
+- **Rocky horseshoe** (Tom's reference photos; his pick of four styles): the falls are now made of rock
+  (`FallsBuilder.Stones`, `FallsRock.gdshader`): stacked slabs of dark layered stone (faces as 4 x 4 grids pushed in
+  by noise, so chipped rather than crates) forming the face behind the water (undercut lower down), 2-3 outcrops on
+  the lip that split the fall into separate streams (thinner towards their edges; they collide), walls 8 m into the
+  banks with their tops at the ground, and 4 rounded boulders half sunk in the pool (Rock shader, collide). The stone
+  is wet near the falls, banded, with moss on upward faces and water films on steep ones. The sheet is more
+  see-through so the rock shows. Other styles (tiered cascades, tall chutes in gorges, ledge falls in rapids) are
+  possible later.

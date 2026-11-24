@@ -19,7 +19,8 @@ public static class FallsBuilder
     {
         var fa = f.Falls;
         var root = new Node3D { Name = "Waterfall" };
-        var cols = Columns(f, fa);
+        var outcrops = Outcrops(f, fa);
+        var cols = Columns(f, fa, outcrops);
         var shader = GD.Load<Shader>("res://Game/Shaders/Falls.gdshader");
         float drop = fa.TopEta - fa.BottomEta;
         ShaderMaterial Mat(int mode)
@@ -51,57 +52,192 @@ public static class FallsBuilder
             root.AddChild(Brink(f, brink, dir, halfLen, mist: true));
         }
         root.AddChild(TrailPost(f, fa));
-        root.AddChild(LedgeRocks(f, fa, cols));
+        root.AddChild(Stones(f, fa, cols, outcrops));
+        return root;
+    }
+
+    /// <summary>A rock outcrop standing up on the lip: the water splits around it.</summary>
+    struct Outcrop { public float Across, Half; }
+
+    /// <summary>2-3 outcrops spread along the lip, leaving streams of water between them.</summary>
+    static List<Outcrop> Outcrops(ReachField f, FallsSpec fa)
+    {
+        var rng = new Rng(f.Seed + 601);
+        int n = 2 + rng.Range(0, 2);
+        float span = fa.HalfWidth * 1.5f;
+        var list = new List<Outcrop>();
+        for (int k = 0; k < n; k++)
+        {
+            float c = -span * 0.5f + span * (k + 0.5f) / n + rng.Range(-0.15f, 0.15f) * span / n;
+            list.Add(new Outcrop { Across = c, Half = rng.Range(1.2f, 2.4f) });
+        }
+        return list;
+    }
+
+    // ================================================================ rock (D22, after Tom's reference photos)
+
+    /// <summary>
+    /// The rock of the falls, as stacked slabs of dark layered stone (one mesh, FallsRock.gdshader):
+    ///   - the face behind the falling water, all along the lip, its top just under the water at the brink, its lower
+    ///     slabs set back (undercut, as falls erode);
+    ///   - the outcrops on the lip, standing above the water, splitting it into streams;
+    ///   - walls carrying the face 8 m into both banks, their tops at the ground (rock showing in the bank);
+    ///   - boulders in the plunge pool.
+    /// Outcrops and pool boulders collide (the raft bumps them).
+    /// </summary>
+    static Node3D Stones(ReachField f, FallsSpec fa, List<Column> cols, List<Outcrop> outcrops)
+    {
+        var root = new Node3D { Name = "FallsRock" };
+        if (cols.Count == 0) return root;
+        var verts = new List<Vector3>(); var colors = new List<Color>();
+        var body = new StaticBody3D { Name = "FallsRockCollision", CollisionLayer = 1, CollisionMask = 0 };
+        root.AddChild(body);
+        var rng = new Rng(f.Seed + 811);
+        float ax = -fa.DirZ, az = fa.DirX;
+        float bottom = fa.BottomEta - 1.2f, top = fa.TopEta;
+        (Vector3 p, Vector3 n) LipPoint(float c)
+        {
+            float lipS = FallsSpec.LipAt(c, fa.HalfWidth, fa.Height, f.Seed);
+            float slope = FallsSpec.LipAt(c + 0.5f, fa.HalfWidth, fa.Height, f.Seed) - FallsSpec.LipAt(c - 0.5f, fa.HalfWidth, fa.Height, f.Seed);
+            var n = new Vector3(fa.DirX - ax * slope, 0f, fa.DirZ - az * slope).Normalized();
+            return (new Vector3(fa.LipX + ax * c + fa.DirX * lipS, 0f, fa.LipZ + az * c + fa.DirZ * lipS), n);
+        }
+        float minC = cols[0].Across, maxC = cols[^1].Across;
+        // The face, and the walls beyond the ends of the water.
+        for (float c = minC - 8f; c <= maxC + 8f; c += rng.Range(2.2f, 3.4f))
+        {
+            var (p, n) = LipPoint(c);
+            bool bank = c < minC - 0.5f || c > maxC + 0.5f;
+            float ground = f.InDomain(p.X, p.Z) ? f.SampleHeight(p.X - n.X * 1.5f, p.Z - n.Z * 1.5f) : top;
+            float stackTop = bank ? MathF.Min(top + 0.4f, ground - rng.Range(0.05f, 0.35f)) : top - rng.Range(0.1f, 0.25f);
+            float depth = bank ? rng.Range(2.5f, 4f) : rng.Range(1.8f, 2.6f);
+            // Front just behind the lip line; the stack reaches back upstream (under the brink water).
+            AddStack(verts, colors, rng, p - n * (0.12f + depth * 0.5f), n, rng.Range(3.2f, 4.6f), depth, bottom, stackTop, bank ? 0.2f : 0.9f);
+        }
+        // Outcrops on the lip.
+        foreach (var o in outcrops)
+        {
+            var (p, n) = LipPoint(o.Across);
+            float stackTop = top + rng.Range(0.6f, 1.5f), depth = rng.Range(3f, 4.2f);
+            var centre = p + n * rng.Range(0.2f, 1.0f) - n * depth * 0.5f;
+            AddStack(verts, colors, rng, centre, n, o.Half * 2f, depth, bottom, stackTop, 0.3f);
+            AddBox(body, centre, n, o.Half * 2f, depth, bottom, stackTop);
+        }
+        // Boulders in the plunge pool, away from the put-in.
+        float drop = fa.TopEta - fa.BottomEta;
+        var boulderMat = new ShaderMaterial { Shader = GD.Load<Shader>("res://Game/Shaders/Rock.gdshader") };
+        float hco = MathF.Cos(f.Frame.Heading), hsi = MathF.Sin(f.Frame.Heading);
+        var wdir = new Vector2(fa.DirX * hco + fa.DirZ * hsi, -fa.DirX * hsi + fa.DirZ * hco);
+        for (int k = 0, tries = 0; k < 4 && tries < 60; tries++)
+        {
+            var col = cols[rng.Range(0, cols.Count)];
+            var pos = col.Lip + col.Dir * (Throw(col, drop) + rng.Range(4f, 20f)) + new Vector3(ax, 0, az) * rng.Range(-3f, 3f);
+            if (!f.InDomain(pos.X, pos.Z) || f.SampleDepth(pos.X, pos.Z) < 0.6f) continue;
+            if (new Vector2(pos.X - fa.PutInX, pos.Z - fa.PutInZ).Length() < 12f) continue;
+            float r = rng.Range(0.9f, 1.8f);
+            var boulder = new MeshInstance3D
+            {
+                Mesh = Vegetation.RockMesh(f.Seed + 1300 + k * 17, r), MaterialOverride = boulderMat,
+                Position = new Vector3(pos.X, fa.BottomEta - rng.Range(0.35f, 0.6f) * r, pos.Z),
+                Rotation = new Vector3(rng.Range(-0.25f, 0.25f), rng.Range(0f, MathF.Tau), rng.Range(-0.2f, 0.2f)),
+                Scale = new Vector3(rng.Range(1.1f, 1.5f), rng.Range(0.55f, 0.75f), rng.Range(1.0f, 1.4f)),
+            };
+            boulder.SetInstanceShaderParameter("water_level", fa.BottomEta);
+            boulder.SetInstanceShaderParameter("flow", new Vector4(wdir.X, wdir.Y, 1.2f, r));
+            root.AddChild(boulder);
+            body.AddChild(new CollisionShape3D { Shape = new SphereShape3D { Radius = r * 0.85f }, Position = boulder.Position });
+            k++;
+        }
+        var arrays = new Godot.Collections.Array();
+        arrays.Resize((int)Mesh.ArrayType.Max);
+        arrays[(int)Mesh.ArrayType.Vertex] = verts.ToArray();
+        arrays[(int)Mesh.ArrayType.Color] = colors.ToArray();
+        var mesh = new ArrayMesh();
+        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+        var st = new SurfaceTool();
+        st.CreateFrom(mesh, 0);
+        st.GenerateNormals();
+        var mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://Game/Shaders/FallsRock.gdshader") };
+        mat.SetShaderParameter("pool_level", fa.BottomEta);
+        mat.SetShaderParameter("top_level", fa.TopEta);
+        root.AddChild(new MeshInstance3D { Name = "Rock", Mesh = st.Commit(), MaterialOverride = mat });
         return root;
     }
 
     /// <summary>
-    /// Rock ledges on the face beside the falls: big flattened blocks half sunk into the scarp on both banks, from the
-    /// edge of the water outward, at different heights between the pool and the brink (wet near the pool: Rock
-    /// shader). They break up the smooth slope the terrain alone would show there. Decoration only (no collision).
+    /// A stack of stone slabs 0.5-0.8 m thick from y0 to y1, centred at (centre.x, centre.z), facing front: each slab
+    /// a little different in size and offset, corners jittered; lower slabs set back by up to undercut metres.
     /// </summary>
-    static Node3D LedgeRocks(ReachField f, FallsSpec fa, List<Column> cols)
+    static void AddStack(List<Vector3> verts, List<Color> colors, Rng rng, Vector3 centre, Vector3 front, float width, float depth,
+                         float y0, float y1, float undercut)
     {
-        var root = new Node3D { Name = "LedgeRocks" };
-        if (cols.Count == 0) return root;
-        float drop = fa.TopEta - fa.BottomEta;
-        float ax = -fa.DirZ, az = fa.DirX;
-        var mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://Game/Shaders/Rock.gdshader") };
-        var rng = new Rng(f.Seed + 811);
-        float yaw = MathF.Atan2(fa.DirX, fa.DirZ);
-        float co = MathF.Cos(f.Frame.Heading), si = MathF.Sin(f.Frame.Heading);
-        var wdir = new Vector2(fa.DirX * co + fa.DirZ * si, -fa.DirX * si + fa.DirZ * co);
-        void Place(float across, float lipS)
+        if (y1 <= y0 + 0.1f) return;
+        int n = Math.Max(1, (int)MathF.Round((y1 - y0) / rng.Range(0.7f, 1.2f)));
+        var side = new Vector3(-front.Z, 0f, front.X);
+        for (int i = 0; i < n; i++)
         {
-            float r = rng.Range(1.2f, 2.6f);
-            float y = fa.BottomEta + drop * rng.Range(0.05f, 0.85f);
-            // On the face: a little downstream of the lip line, more so lower down (the face leans back).
-            float s = lipS + rng.Range(-0.5f, 1.5f);
-            var pos = new Vector3(fa.LipX + ax * across + fa.DirX * s, y, fa.LipZ + az * across + fa.DirZ * s);
-            var mi = new MeshInstance3D
+            float a = y0 + (y1 - y0) * i / n, b = y0 + (y1 - y0) * (i + 1) / n + 0.04f;
+            float t = n > 1 ? i / (float)(n - 1) : 1f;   // 0 bottom .. 1 top
+            float w = width * rng.Range(0.82f, 1.06f), d = depth * rng.Range(0.8f, 1.05f);
+            var c = centre + front * (rng.Range(-0.15f, 0.15f) - undercut * (1f - t)) + side * rng.Range(-0.25f, 0.25f);
+            float turn = rng.Range(-0.1f, 0.1f);
+            var fr = (front * MathF.Cos(turn) + side * MathF.Sin(turn)).Normalized();
+            var sd = new Vector3(-fr.Z, 0f, fr.X);
+            float tone = rng.Range(0.8f, 1.15f);
+            var k = new Vector3[8];
+            for (int q = 0; q < 8; q++)
             {
-                Mesh = Vegetation.RockMesh(f.Seed + 900 + rng.Range(0, 100000), r), MaterialOverride = mat, Position = pos,
-                Rotation = new Vector3(rng.Range(-0.2f, 0.2f), yaw + rng.Range(-0.5f, 0.5f), rng.Range(-0.15f, 0.15f)),
-                Scale = new Vector3(rng.Range(1.1f, 1.6f), rng.Range(0.55f, 0.8f), rng.Range(0.9f, 1.3f)),
-            };
-            mi.SetInstanceShaderParameter("water_level", fa.BottomEta);
-            mi.SetInstanceShaderParameter("flow", new Vector4(wdir.X, wdir.Y, 0.4f, r));
-            root.AddChild(mi);
+                int cx = q & 1, cy = (q >> 1) & 1, cz = (q >> 2) & 1;
+                var p = c + sd * (cx * 2 - 1) * w * 0.5f + fr * (cz * 2 - 1) * d * 0.5f;
+                p.Y = cy == 0 ? a : b;
+                // Uneven: corners jittered.
+                p += sd * rng.Range(-0.3f, 0.3f) + fr * rng.Range(-0.3f, 0.3f) + Vector3.Up * rng.Range(-0.1f, 0.1f);
+                k[q] = p;
+            }
+            // Each face as a 4 x 4 grid, pushed in by noise (chipped, lumpy stone rather than a crate).
+            var mid = (k[0] + k[7]) * 0.5f;
+            Vector3 Rough(Vector3 q, float edgeK)
+            {
+                float nz = 0.5f + 0.5f * River.Core.Noise.Fbm(q.X * 0.8f + q.Y * 0.6f, q.Z * 0.8f - q.Y * 0.4f, 9137, 3);
+                return q + (mid - q).Normalized() * (0.05f + 0.28f * nz) * edgeK;
+            }
+            void Quad(int i0, int i1, int i2, int i3)
+            {
+                const int S = 4;
+                var g = new Vector3[(S + 1) * (S + 1)];
+                for (int v = 0; v <= S; v++)
+                    for (int u = 0; u <= S; u++)
+                    {
+                        float fu = u / (float)S, fv = v / (float)S;
+                        var e0 = k[i0].Lerp(k[i1], fu); var e1 = k[i3].Lerp(k[i2], fu);
+                        // Corners and edges pulled in less: the slab keeps its shape.
+                        float inner = MathF.Min(MathF.Min(fu, 1f - fu), MathF.Min(fv, 1f - fv)) * 2f;
+                        g[v * (S + 1) + u] = Rough(e0.Lerp(e1, fv), 0.35f + 0.65f * inner);
+                    }
+                for (int v = 0; v < S; v++)
+                    for (int u = 0; u < S; u++)
+                    {
+                        int a0 = v * (S + 1) + u, a1 = a0 + 1, a2 = a0 + S + 2, a3 = a0 + S + 1;
+                        foreach (int q in new[] { a0, a1, a2, a0, a2, a3 }) { verts.Add(g[q]); colors.Add(new Color(tone, 0, 0)); }
+                    }
+            }
+            // Outward faces (the winding is checked in the capture: flip if they render inside out).
+            Quad(2, 3, 7, 6);   // top
+            Quad(0, 4, 5, 1);   // bottom
+            Quad(4, 6, 7, 5);   // front (+fr)
+            Quad(0, 1, 3, 2);   // back
+            Quad(1, 5, 7, 3);   // +sd
+            Quad(0, 2, 6, 4);   // -sd
         }
-        // From each edge of the falls outward along the lip line, 16 m into the banks.
-        float minC = cols[0].Across, maxC = cols[^1].Across;
-        float LipS(float across) => FallsSpec.LipAt(across, fa.HalfWidth, fa.Height, f.Seed);
-        for (float d = 0.5f; d < 16f; d += rng.Range(1.8f, 3.2f))
+    }
+
+    static void AddBox(StaticBody3D body, Vector3 centre, Vector3 front, float width, float depth, float y0, float y1)
+    {
+        body.AddChild(new CollisionShape3D
         {
-            Place(minC - d, LipS(minC - d));
-            Place(maxC + d, LipS(maxC + d));
-            if (rng.Next01() < 0.5f) { Place(minC - d, LipS(minC - d)); Place(maxC + d, LipS(maxC + d)); }
-        }
-        // And at the foot of the face between separate falls (where the lip ledges split them).
-        for (int i = 1; i < cols.Count; i++)
-            if (cols[i].Across - cols[i - 1].Across > 1.5f)
-                for (float c = cols[i - 1].Across + 0.8f; c < cols[i].Across - 0.5f; c += 1.6f) Place(c, LipS(c));
-        return root;
+            Shape = new BoxShape3D { Size = new Vector3(width, y1 - y0, depth) },
+            Transform = new Transform3D(new Basis(Vector3.Up, MathF.Atan2(front.X, front.Z)), new Vector3(centre.X, 0.5f * (y0 + y1), centre.Z)),
+        });
     }
 
     /// <summary>One strip of falling water: where it leaves the lip, which way it goes, how much water it carries.</summary>
@@ -119,7 +255,7 @@ public static class FallsBuilder
     /// surface is clipped to): wherever there is water just above it and the water below it has dropped; none where a
     /// lip ledge stands. Each gets its own amount of water (slow noise across: full sheets here, thin threads there).
     /// </summary>
-    static List<Column> Columns(ReachField f, FallsSpec fa)
+    static List<Column> Columns(ReachField f, FallsSpec fa, List<Outcrop> outcrops)
     {
         var cols = new List<Column>();
         float ax = -fa.DirZ, az = fa.DirX;
@@ -140,7 +276,12 @@ public static class FallsBuilder
             foreach (var r in f.Rocks)
                 if ((r.X - lx) * (r.X - lx) + (r.Z - lz) * (r.Z - lz) < (r.Radius * 0.85f) * (r.Radius * 0.85f)) { rock = true; break; }
             if (rock) continue;
+            // No water where an outcrop stands; thinner towards its edges (each stream frays at its sides).
+            float edge = float.MaxValue;
+            foreach (var o in outcrops) edge = MathF.Min(edge, MathF.Abs(c - o.Across) - o.Half);
+            if (edge < 0f) continue;
             float amount = Math.Clamp(0.55f + 0.75f * River.Core.Noise.Fbm1(c / 4.5f, f.Seed + 77, 2), 0.25f, 1f);
+            amount = MathF.Max(0.2f, amount * MathUtil.Smoothstep(0f, 2.5f, edge));
             cols.Add(new Column
             {
                 // The top follows the water just above the brink (drawn down there), tucked 2 cm under it.

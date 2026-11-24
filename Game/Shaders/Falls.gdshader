@@ -101,7 +101,7 @@ void fragment() {
 			// Thin columns tear into separate threads; full ones stay a sheet. A little see-through everywhere.
 			float threads = smoothstep(0.62 - 0.5 * amount, 0.8 - 0.45 * amount, streak + 0.12 * (1.0 - down));
 			float body = mix(threads, 1.0, smoothstep(0.75, 1.0, amount));
-			float a = mix(0.82, 0.96, white) * mix(1.0, body, smoothstep(0.08, 0.3, down));
+			float a = mix(0.62, 0.95, white) * mix(1.0, body, smoothstep(0.08, 0.3, down));   // glassy water lets the rock show
 			// See-through between the strands lower down: the dark wet rock shows behind.
 			a *= mix(1.0, 0.45 + 0.55 * smoothstep(0.25, 0.75, hair * 0.6 + fine * 0.4), smoothstep(0.2, 0.6, down) * (1.1 - amount));
 			ALBEDO *= mix(0.86, 1.0, hair);
