@@ -325,3 +325,8 @@ at the landing, since there is no survival yet).
   streak noise is warped and turned (value noise showed its grid as rectangular blotches); the glassy tongue takes
   the river's colour instead of near-black. A top-down `falls_map` shot shows the shape; from the upper water near an
   end the plunge pool's side is a steep rock wall, as intended. Shots `falls_flank`, `falls_map`.
+- **Sixth look** (Tom: from above the pool the sheet's lower half vanished; no mist at the foot; wants mist at the top
+  too): a draw-order bug. All of it is see-through; the sheet didn't write depth, so the river (drawn after it) painted
+  the pool over it, and over the spray and mist. Now the sheet writes depth (`depth_draw_always`) and the order is
+  sheet 0, river 1, spray and mist 2, veil 3. Spray and mist also at the brink (fine droplets thrown off the edge, a
+  thin mist lying over it). Shot `falls_over`.

@@ -464,6 +464,14 @@ public partial class Main : Node3D
                 FlyCam.SetView(above, 0f, -89.9f);
                 break;
             }
+            case "falls_over":
+            {
+                // From above the pool, looking up at the falls and the river beyond (Tom's view).
+                if (FindFeature(FeatureKind.Falls) is not { } f) break;
+                var p = At(f.Lip + 22.0); var l = At(f.Lip - 2.0);
+                FlyCam.LookAtPoint(OnWater(p.x, p.z, 11f), OnWater(l.x, l.z, -5f));
+                break;
+            }
             case "falls_flank":
             {
                 // On the upper water near one end of the falls, looking across the curve and down into the pool.

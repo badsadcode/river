@@ -27,6 +27,7 @@ public static class FallsBuilder
             var m = new ShaderMaterial { Shader = shader };
             m.SetShaderParameter("drop", drop);
             m.SetShaderParameter("mode", mode);
+            m.RenderPriority = mode == 1 ? 3 : 0;   // the veil last (it writes depth too: nothing see-through may come after it)
             return m;
         }
         root.AddChild(Sheet(cols, fa, veil: false, Mat(0)));
@@ -42,6 +43,12 @@ public static class FallsBuilder
             float halfLen = 0.5f * (cols[q1 - 1].Across - cols[q0].Across) + 0.6f;
             root.AddChild(Spray(f, fa, foot, dir, halfLen, mist: false));
             root.AddChild(Spray(f, fa, foot, dir, halfLen, mist: true));
+            // And at the brink: droplets torn off the edge, and a thin mist lying over it (blends the river into the drop).
+            var brink = Vector3.Zero;
+            for (int q = q0; q < q1; q++) brink += cols[q].Lip;
+            brink /= q1 - q0;
+            root.AddChild(Brink(f, brink, dir, halfLen, mist: false));
+            root.AddChild(Brink(f, brink, dir, halfLen, mist: true));
         }
         root.AddChild(TrailPost(f, fa));
         root.AddChild(LedgeRocks(f, fa, cols));
@@ -294,6 +301,52 @@ public static class FallsBuilder
         };
     }
 
+    /// <summary>
+    /// Spray and mist at the brink: fine droplets leaving the edge with the water (thrown out, then falling) and a thin,
+    /// slow mist lying just over the edge, drifting a little downstream and up from the falls below.
+    /// </summary>
+    static GpuParticles3D Brink(ReachField f, Vector3 lip, Vector3 dir, float halfSpan, bool mist)
+    {
+        float co = MathF.Cos(f.Frame.Heading), si = MathF.Sin(f.Frame.Heading);
+        float wdx = dir.X * co + dir.Z * si, wdz = -dir.X * si + dir.Z * co;
+        var pm = new ParticleProcessMaterial
+        {
+            EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Box,
+            EmissionBoxExtents = new Vector3(halfSpan, mist ? 0.4f : 0.1f, mist ? 1.6f : 0.4f),
+            Direction = mist ? new Vector3(wdx * 0.4f, 0.6f, wdz * 0.4f).Normalized() : new Vector3(wdx, 0.35f, wdz).Normalized(),
+            Spread = mist ? 40f : 18f,
+            InitialVelocityMin = mist ? 0.15f : 1.2f,
+            InitialVelocityMax = mist ? 0.5f : 2.4f,
+            Gravity = mist ? new Vector3(wdx * 0.15f, 0.08f, wdz * 0.15f) : new Vector3(0f, -9.81f, 0f),
+            ScaleMin = mist ? 0.6f : 0.4f, ScaleMax = mist ? 1.4f : 1.1f,
+            AngleMin = -180f, AngleMax = 180f,
+            AngularVelocityMin = mist ? -8f : 0f, AngularVelocityMax = mist ? 8f : 0f,
+            ColorRamp = new GradientTexture1D
+            {
+                Gradient = new Gradient
+                {
+                    Offsets = new[] { 0f, 0.25f, 1f },
+                    Colors = mist
+                        ? new[] { new Color(1, 1, 1, 0f), new Color(1, 1, 1, 0.18f), new Color(1, 1, 1, 0f) }
+                        : new[] { new Color(1, 1, 1, 0f), new Color(1, 1, 1, 0.45f), new Color(1, 1, 1, 0f) },
+                },
+            },
+        };
+        return new GpuParticles3D
+        {
+            Name = mist ? "BrinkMist" : "BrinkSpray",
+            Amount = mist ? 24 : 70,
+            Lifetime = mist ? 5f : 1.0f,
+            ProcessMaterial = pm,
+            DrawPass1 = new QuadMesh { Size = mist ? new Vector2(4f, 4f) : new Vector2(0.14f, 0.14f), Material = mist ? MistMaterial() : SprayMaterial() },
+            Position = lip + dir * (mist ? 0.8f : 0.2f) + Vector3.Up * (mist ? 0.5f : 0.05f),
+            Rotation = new Vector3(0f, MathF.Atan2(dir.X, dir.Z), 0f),
+            VisibilityAabb = new Aabb(new Vector3(-30, -15, -30), new Vector3(60, 30, 60)),
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            Randomness = 0.6f,
+        };
+    }
+
     static StandardMaterial3D _mist;
 
     /// <summary>
@@ -324,6 +377,7 @@ public static class FallsBuilder
             AlbedoColor = new Color(0.93f, 0.95f, 0.96f),
             AlbedoTexture = ImageTexture.CreateFromImage(img),
             Roughness = 1f,
+            RenderPriority = 2,   // after the river (1), or its surface is painted over the mist
         };
     }
 
@@ -349,6 +403,7 @@ public static class FallsBuilder
             AlbedoColor = new Color(0.94f, 0.96f, 0.97f),
             AlbedoTexture = ImageTexture.CreateFromImage(img),
             Roughness = 1f,
+            RenderPriority = 2,   // after the river (1), or its surface is painted over the spray
             // Lit (not unshaded): at dusk the mist must darken with everything else.
         };
     }

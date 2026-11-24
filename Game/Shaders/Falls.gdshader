@@ -6,7 +6,10 @@
 //   mode 1, the veil: thin white spray just in front of the sheet, lower down.
 //   mode 2, the churn: UV.y = 0 where the water lands → 1 nine metres out. A white boil that heaves, spreads and thins.
 shader_type spatial;
-render_mode cull_disabled, depth_draw_opaque, specular_schlick_ggx, shadows_disabled;   // aerated falling water holds no crisp shadow
+// depth_draw_always: the sheet is see-through, but it must still hide the pool behind it. Transparent things are
+// drawn in order (sheet 0, river 1, spray and mist 2, veil 3: FallsBuilder); without depth the river, drawn after it,
+// painted the pool over the sheet's lower half.
+render_mode cull_disabled, depth_draw_always, specular_schlick_ggx, shadows_disabled;   // aerated falling water holds no crisp shadow
 
 // Floating origin (World/Origin.cs): scene position + world_origin = world position.
 global uniform vec3 world_origin;
