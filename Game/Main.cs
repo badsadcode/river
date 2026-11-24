@@ -163,6 +163,7 @@ public partial class Main : Node3D
         if (_args.TryGetValue("time", out var t)) Env.ApplyPreset(int.Parse(t) % EnvironmentRig.PresetNames.Length);
 
         AddChild(new Hud { Name = "Hud" });
+        AddChild(new Underwater { Name = "Underwater" });
         _status.Visible = false;
 
         if (_args.ContainsKey("portage-test")) { Streamer.StartWorker(); _ = PortageTest(); return; }
@@ -478,6 +479,27 @@ public partial class Main : Node3D
                 if (FindFeature(FeatureKind.Falls) is not { } f) break;
                 var p = At(f.Lip + 9.0); var l = At(f.Lip + 2.0);
                 FlyCam.LookAtPoint(OnWater(p.x - p.rx * 0.7f * p.hl, p.z - p.rz * 0.7f * p.hl, 2.2f), OnWater(l.x + l.rx * 0.4f * l.hr, l.z + l.rz * 0.4f * l.hr, 1f));
+                break;
+            }
+            case "underwater":
+            {
+                // Under the water beside the raft, looking along the bed and up at the surface.
+                var (rwx, rwz) = Origin.ToWorld(raft);
+                // Halfway between the surface and the bed (the water there may be shallow).
+                double fx = rwx + right.X * 4f, fz = rwz + right.Z * 4f;
+                float half = 0.5f * World.DepthAt(fx, fz);
+                var from = OnWater(fx, fz, -half);
+                FlyCam.LookAtPoint(from, OnWater(rwx + fwd.X * 12f + right.X * 2f, rwz + fwd.Z * 12f + right.Z * 2f, -half * 1.4f));
+                break;
+            }
+            case "bank":
+            {
+                // Low over the water near a bank, looking along it (the shoreline).
+                var (rwx, rwz) = Origin.ToWorld(raft);
+                var w = World.At(rwx, rwz);
+                int i = c.RiverIndexAt(World.Course.ProjectOnValley(rwx, rwz, (int)(_startSigma / Course.ValleyStep)).sigma);
+                var p = At(c.Sigma[i]); var q = At(c.Sigma[i] + 30.0);
+                FlyCam.LookAtPoint(OnWater(p.x - p.rx * (p.hl - 4f), p.z - p.rz * (p.hl - 4f), 2.5f), OnWater(q.x - q.rx * p.hl, q.z - q.rz * p.hl, 0f));
                 break;
             }
             case "falls_flank":

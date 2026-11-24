@@ -8,7 +8,8 @@
 //   SPECULAR = the engine's sky reflection and sun glint, switched off where the SSR found something
 // See docs/WATER.md for the reasoning and the knobs.
 shader_type spatial;
-render_mode blend_mix, cull_back, depth_draw_opaque, specular_schlick_ggx;
+// Both faces: from below (the underwater view, World/Underwater.cs) the surface is seen from its back.
+render_mode blend_mix, cull_disabled, depth_draw_opaque, specular_schlick_ggx;
 
 // Floating origin (World/Origin.cs): scene position + world_origin = world position, for patterns and clipping.
 global uniform vec3 world_origin;
@@ -405,4 +406,17 @@ void fragment() {
 	if (debug_view == 1) { ALBEDO = vec3(0.0); EMISSION = vec3(0.0); }
 	if (debug_view == 2) { ALBEDO = vec3(0.0); SPECULAR = 0.0; }
 	if (debug_view == 3) { EMISSION = vec3(0.0); SPECULAR = 0.0; }
+	// From below: the surface is a bright, rippling ceiling where you look up steeply (Snell's window: the sky and
+	// light come through), a dark green mirror of the water at a grazing angle (total internal reflection).
+	if (!FRONT_FACING) {
+		float up_k = clamp(dot(-n_view, vdir), 0.0, 1.0);
+		float window = smoothstep(0.55, 0.8, up_k);
+		vec3 deep = vec3(0.03, 0.10, 0.09);
+		vec3 sky_through = vec3(0.45, 0.62, 0.62) * (0.85 + 0.3 * nS.x);
+		ALBEDO = vec3(0.0);
+		EMISSION = mix(deep, sky_through, window) * (1.0 - foam * 0.5) + foam_albedo * foam * 0.4;
+		SPECULAR = 0.0;
+		ROUGHNESS = 1.0;
+		ALPHA = 1.0;
+	}
 }

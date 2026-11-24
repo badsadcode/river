@@ -114,7 +114,18 @@ void fragment() {
 	// Riverbed: sand in the shallows to dark silt in the deep.
 	float under = -above;
 	if (under > 0.0) {
-		vec3 bedc = mix(mix(sand, gravel, n2) * 0.9, silt, smoothstep(0.3, 2.5, under));
+		// The bed: sand ripples in the shallows, patches of pebbles (rounded stones, each its own shade), dark
+		// weed in slow, deeper water, silt in the deep.
+		float patch_k = smoothstep(0.45, 0.65, fbm(p * 0.06 + 7.0));                 // gravel patches
+		vec2 cell = floor(p * 3.2), fc = fract(p * 3.2) - 0.5;
+		float pebble = smoothstep(0.42, 0.3, length(fc + (vec2(vnoise(cell * 1.7), vnoise(cell * 2.3 + 5.0)) - 0.5) * 0.35));
+		vec3 stones = gravel * (0.65 + 0.6 * vnoise(cell * 3.1)) * mix(0.75, 1.05, pebble);
+		float ripple = 0.5 + 0.5 * sin(dot(p, vec2(0.83, 0.55)) * 5.5 + n2 * 5.0);
+		vec3 sandy = sand * (0.88 + 0.18 * ripple * (1.0 - smoothstep(0.4, 1.5, under)));
+		vec3 bedc = mix(sandy, stones, patch_k);
+		float weed = smoothstep(0.55, 0.75, fbm(p * 0.09 + 13.0)) * smoothstep(0.8, 1.8, under) * (1.0 - patch_k);
+		bedc = mix(bedc, vec3(0.10, 0.15, 0.06) * (0.8 + 0.4 * n3), weed * 0.7);
+		bedc = mix(bedc, silt, smoothstep(1.2, 3.5, under));
 		col = mix(col, bedc, smoothstep(0.0, 0.25, under));
 	}
 

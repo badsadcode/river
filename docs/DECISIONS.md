@@ -342,3 +342,19 @@ at the landing, since there is no survival yet).
   the sheet has volume (two looser layers of streamers in front, thrown further out lower down, drawn after the
   river without writing depth: their shader is a runtime copy of Falls.gdshader with depth_draw_never); softer
   thread edges (no angular shards); a boil of churning froth puffs where the water lands. Shot `falls_foot`.
+
+## D23 — Smooth banks, a varied riverbed, the underwater view
+Tom: jagged lines on the banks; variable depths where it makes sense; an underwater effect.
+- **Smooth banks**: the shore distance came from the 2 m grid's water mask (an EDT), so every diagonal bank was a
+  staircase in the bank shape, the wet band and the bed. Within 10 m of the shore it now comes from the channels'
+  geometry (|offset from the nearest centre line| − half-width, islands by their outlines, blended in 6–10 m out),
+  its sign always agreeing with the mask (`ReachGenerator.SmoothShore`). The flow is still solved on the mask.
+- **Riverbed**: pools and shallows ~130 m apart, the deepest line wandering across the channel, now and then a scour
+  hole mid-channel (world noise, so seams agree; never below 60 % of the plain profile). The bed shader shows sand
+  ripples in the shallows, patches of pebbles, dark weed in slow deeper water, silt in the deep. Seams improved
+  (raw current mismatch 11 → 4 cm/s); prototype fingerprint 4135CC8ACA1D7D49.
+- **Underwater** (`World/Underwater.cs`, `Underwater.gdshader`): while the current camera is below the surface, a
+  full-screen quad tints, fogs by depth-buffer distance (~13 m of sight), blurs and wobbles the picture, darker with
+  depth and at night; the river surface is drawn from below too (bright Snell's window looking up, a dark green
+  mirror at grazing angles). The swimming player's eyes stay above water, so it shows with the fly or chase camera
+  for now; diving would make it part of play. Shots `underwater`, `bank`.

@@ -120,6 +120,7 @@ public static class ReachGenerator
         Edt.Compute(land, nx, nz, distToLand, nearestLand);
         for (int i = 0; i < total; i++)
             f.ShoreDist[i] = f.Water[i] ? -(distToLand[i] - 0.5f) * s.Cell : (distToWater[i] - 0.5f) * s.Cell;
+        SmoothShore(f, lines, nearIdx);
         Log("shore distance");
 
         // ------------------------------------------------------------ 5. depth (bed shape relative to the surface)
@@ -200,6 +201,7 @@ public static class ReachGenerator
             Edt.Compute(land, nx, nz, distToLand, nearestLand);
             for (int i = 0; i < total; i++)
                 f.ShoreDist[i] = f.Water[i] ? -(distToLand[i] - 0.5f) * s.Cell : (distToWater[i] - 0.5f) * s.Cell;
+            SmoothShore(f, lines, nearIdx);
         }
         Log($"inflow main {inMain:F1} m³/s, tributary {inTrib:F1} m³/s; {pondCount} still-water nodes; {stillCount} isolated water nodes turned to land");
 
@@ -561,6 +563,50 @@ public static class ReachGenerator
             });
     }
 
+    // ================================================================ smooth shores
+
+    /// <summary>
+    /// Near the water, the distance to the shore from the channels' own geometry instead of the 2 m grid's water mask
+    /// (which made every diagonal bank a staircase: Tom's "jagged lines"): distance to the nearest channel's bank
+    /// (|offset from its centre line| − half-width there), and to the outline of any island, blended in within 6–10 m
+    /// of the shore. Its sign always agrees with the mask (the flow is solved on the mask).
+    /// </summary>
+    static void SmoothShore(ReachField f, List<Centerline> lines, int[][] nearIdx)
+    {
+        int nx = f.Nx, total = nx * f.Nz;
+        Par.For(0, f.Nz, iz =>
+        {
+            for (int ix = 0; ix < nx; ix++)
+            {
+                int i = iz * nx + ix;
+                float edt = f.ShoreDist[i];
+                if (MathF.Abs(edt) > 10f) continue;
+                float x = ix * f.Cell, z = iz * f.Cell;
+                float sd = float.MaxValue;
+                for (int l = 0; l < lines.Count; l++)
+                {
+                    var c = lines[l]; int k = nearIdx[l][i];
+                    if (k < 0) continue;
+                    float dx = x - c.X[k], dz = z - c.Z[k];
+                    var (rx, rz) = c.Right(k);
+                    float lat = dx * rx + dz * rz, along = dx * c.TanX[k] + dz * c.TanZ[k];
+                    if ((k == 0 && along < -1.5f) || (k == c.Count - 1 && along > 1.5f)) continue;
+                    sd = MathF.Min(sd, MathF.Abs(lat) - (lat < 0 ? c.HalfLeft[k] : c.HalfRight[k]));
+                }
+                if (sd == float.MaxValue) continue;
+                foreach (var isl in f.Islands)
+                {
+                    float r = MathF.Max(isl.LengthUp, isl.LengthDown) * 1.4f + 12f;
+                    if ((x - isl.X) * (x - isl.X) + (z - isl.Z) * (z - isl.Z) > r * r) continue;
+                    sd = MathF.Max(sd, -isl.Sdf(x, z));
+                }
+                // The mask decides which side a node is on; the geometry only how far.
+                sd = f.Water[i] ? -MathF.Max(0.05f, -sd) : MathF.Max(0.05f, sd);
+                f.ShoreDist[i] = MathUtil.Lerp(edt, sd, MathUtil.Smoothstep(10f, 6f, MathF.Abs(edt)));
+            }
+        });
+    }
+
     // ================================================================ grid helpers
 
     static void ForNodesNear(ReachField f, float cx, float cz, float r, Action<int> act)
@@ -624,7 +670,13 @@ public static class ReachGenerator
         float u = MathUtil.Clamp01(t / tau);
         float prof = 1f - (1f - u) * (1f - u);
         // Noise at the world position (wx, wz), so overlapping segments carve the same bed.
-        float var = 1f + 0.12f * Noise.Fbm(wx / 45f, wz / 45f, seed + 31, 3);
+        // Variable bed (Tom: "variable depths where it makes sense"): pools and shallows along the river (~100–150 m,
+        // as a river's pool–riffle rhythm), the deepest line wandering a little across the channel, now and then a
+        // deep scour hole mid-channel, and the small 45 m unevenness. Never shallower than 60 % of the plain profile.
+        float pools = 0.2f * Noise.Fbm(wx / 130f, wz / 130f, seed + 33, 2);
+        float wander = 0.25f * Noise.Fbm(wx / 70f, wz / 70f, seed + 34, 2) * (lateral / MathF.Max(halfSide, 1f));
+        float hole = 0.35f * MathUtil.Smoothstep(0.35f, 0.6f, Noise.Fbm(wx / 22f, wz / 22f, seed + 35, 2)) * u * u;
+        float var = MathF.Max(0.6f, 1f + 0.12f * Noise.Fbm(wx / 45f, wz / 45f, seed + 31, 3) + pools + wander + hole);
         float dunes = 0.06f * Noise.Gradient(wx / 9f, wz / 9f, seed + 32) * u;
         return c.MaxDepth[k] * prof * var + dunes;
     }
