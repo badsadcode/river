@@ -13,7 +13,7 @@ global uniform vec3 world_origin;
 
 uniform int mode = 0;
 uniform float drop = 8.0;            // metres
-uniform vec3 glass_color : source_color = vec3(0.07, 0.15, 0.14);
+uniform vec3 glass_color : source_color = vec3(0.16, 0.25, 0.25);   // the river's own colour, curving over the brink
 uniform vec3 white_color : source_color = vec3(0.93, 0.95, 0.96);
 
 varying vec4 v_col;
@@ -24,7 +24,12 @@ float vnoise(vec2 p) {
 	vec2 u = f * f * (3.0 - 2.0 * f);
 	return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
 }
-float fbm(vec2 p) { return vnoise(p) * 0.55 + vnoise(p * 2.1 + 3.7) * 0.3 + vnoise(p * 4.3 + 9.1) * 0.15; }
+// Value noise lines up with its grid (rectangular blotches up close): warp and turn the coordinates first.
+vec2 warp(vec2 p) {
+	p = mat2(vec2(0.86, 0.5), vec2(-0.5, 0.86)) * p;
+	return p + 0.6 * vec2(vnoise(p * 0.7 + 11.0), vnoise(p * 0.7 + 23.0));
+}
+float fbm(vec2 p) { p = warp(p); return vnoise(p) * 0.55 + vnoise(p * 2.1 + 3.7) * 0.3 + vnoise(p * 4.3 + 9.1) * 0.15; }
 
 void vertex() {
 	v_col = COLOR;
@@ -66,7 +71,7 @@ void fragment() {
 		float big = fbm(vec2(across * 0.9 + seed * 7.0, y1));
 		float fine = fbm(vec2(across * 3.8 + seed * 13.0, y2));
 		// Hair-fine streaks (a few cm across), racing faster: what the eye reads as falling water up close.
-		float hair = vnoise(vec2(across * 11.0 + seed * 31.0, sqrt(s + 0.4) * 9.0 - TIME * 9.0));
+		float hair = vnoise(warp(vec2(across * 11.0 + seed * 31.0, sqrt(s + 0.4) * 9.0 - TIME * 9.0)));
 		// Seen edge-on or from afar the finest detail would alias into blocks: fade it to its mean there.
 		float fw_h = fwidth(across * 11.0) + fwidth(sqrt(s + 0.4) * 9.0);
 		float fw_f = fwidth(across * 3.8) + fwidth(sqrt(s + 0.4) * 4.6);

@@ -455,6 +455,23 @@ public partial class Main : Node3D
                 FlyCam.LookAtPoint(OnWater(l.x + l.rx * side * (hw + 8.0), l.z + l.rz * side * (hw + 8.0), 14f), OnWater(pool.x, pool.z, 0f));
                 break;
             }
+            case "falls_map":
+            {
+                // Straight down over the lip from 90 m: the shape of the falls, the pool and the sheet.
+                if (FindFeature(FeatureKind.Falls) is not { } f) break;
+                var l = At(f.Lip);
+                var above = OnWater(l.x, l.z, 90f);
+                FlyCam.SetView(above, 0f, -89.9f);
+                break;
+            }
+            case "falls_flank":
+            {
+                // On the upper water near one end of the falls, looking across the curve and down into the pool.
+                if (FindFeature(FeatureKind.Falls) is not { } f) break;
+                var u = At(f.Lip - 5.0); var d = At(f.Lip + 10.0);
+                FlyCam.LookAtPoint(OnWater(u.x + u.rx * 0.8f * u.hr, u.z + u.rz * 0.8f * u.hr, 3.5f), OnWater(d.x - d.rx * 0.2f * d.hl, d.z - d.rz * 0.2f * d.hl, -4f));
+                break;
+            }
             case "falls_edge":
             {
                 // On the water a few metres above the edge, looking over it.

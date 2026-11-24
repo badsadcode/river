@@ -31,15 +31,17 @@ public static class FallsBuilder
         }
         root.AddChild(Sheet(cols, fa, veil: false, Mat(0)));
         root.AddChild(Sheet(cols, fa, veil: true, Mat(1)));
-        // Spray and mist rise where the water lands: centred on the foot of the sheet, as wide as the falls.
-        if (cols.Count > 0)
+        // Spray and mist rise all along the foot, where the water lands: an emitter every ~6 m of the curved sheet,
+        // facing the way the water there falls.
+        for (int q0 = 0; q0 < cols.Count; q0 += 12)
         {
-            var foot = Vector3.Zero;
-            foreach (var c in cols) foot += c.Lip + c.Dir * Throw(c, drop);
-            foot /= cols.Count;
-            float halfSpan = 0.5f * (cols[^1].Across - cols[0].Across) + 1f;
-            root.AddChild(Spray(f, fa, foot, halfSpan, mist: false));
-            root.AddChild(Spray(f, fa, foot, halfSpan, mist: true));
+            int q1 = Math.Min(cols.Count, q0 + 12);
+            var foot = Vector3.Zero; var dir = Vector3.Zero;
+            for (int q = q0; q < q1; q++) { foot += cols[q].Lip + cols[q].Dir * Throw(cols[q], drop); dir += cols[q].Dir; }
+            foot /= q1 - q0; dir = dir.Normalized();
+            float halfLen = 0.5f * (cols[q1 - 1].Across - cols[q0].Across) + 0.6f;
+            root.AddChild(Spray(f, fa, foot, dir, halfLen, mist: false));
+            root.AddChild(Spray(f, fa, foot, dir, halfLen, mist: true));
         }
         root.AddChild(TrailPost(f, fa));
         root.AddChild(LedgeRocks(f, fa, cols));
@@ -121,8 +123,12 @@ public static class FallsBuilder
             float lipS = FallsSpec.LipAt(c, fa.HalfWidth, fa.Height, f.Seed);
             float lx = fa.LipX + ax * c + fa.DirX * lipS, lz = fa.LipZ + az * c + fa.DirZ * lipS;
             if (!f.InDomain(lx, lz)) continue;
-            if (f.SampleDepth(lx - fa.DirX * 2.5f, lz - fa.DirZ * 2.5f) < 0.15f) { Dbg(c, "no water above"); continue; }
-            if (f.SampleEta(lx + fa.DirX * 3f, lz + fa.DirZ * 3f) > fa.TopEta - 0.5f * drop) { Dbg(c, $"no drop (eta {f.SampleEta(lx + fa.DirX * 3f, lz + fa.DirZ * 3f):F2})"); continue; }
+            // Water pours over at right angles to its edge: on the horseshoe's sides it falls inwards, not downstream.
+            float slope = FallsSpec.LipAt(c + 0.5f, fa.HalfWidth, fa.Height, f.Seed) - FallsSpec.LipAt(c - 0.5f, fa.HalfWidth, fa.Height, f.Seed);
+            float nx = fa.DirX - ax * slope, nz = fa.DirZ - az * slope, nl = MathF.Sqrt(nx * nx + nz * nz);
+            nx /= nl; nz /= nl;
+            if (f.SampleDepth(lx - nx * 2.5f, lz - nz * 2.5f) < 0.15f) { Dbg(c, "no water above"); continue; }
+            if (f.SampleEta(lx + nx * 3f, lz + nz * 3f) > fa.TopEta - 0.5f * drop) { Dbg(c, $"no drop (eta {f.SampleEta(lx + nx * 3f, lz + nz * 3f):F2})"); continue; }
             bool rock = false;
             foreach (var r in f.Rocks)
                 if ((r.X - lx) * (r.X - lx) + (r.Z - lz) * (r.Z - lz) < (r.Radius * 0.85f) * (r.Radius * 0.85f)) { rock = true; break; }
@@ -131,8 +137,8 @@ public static class FallsBuilder
             cols.Add(new Column
             {
                 // The top follows the water just above the brink (drawn down there), tucked 2 cm under it.
-                Across = c, Lip = new Vector3(lx, MathF.Max(f.SampleEta(lx - fa.DirX * 2.5f, lz - fa.DirZ * 2.5f), fa.TopEta - 0.4f) - 0.02f, lz),
-                Dir = new Vector3(fa.DirX, 0f, fa.DirZ),
+                Across = c, Lip = new Vector3(lx, MathF.Max(f.SampleEta(lx - nx * 2.5f, lz - nz * 2.5f), fa.TopEta - 0.4f) - 0.02f, lz),
+                Dir = new Vector3(nx, 0f, nz),
                 Amount = amount, Seed = River.Core.Noise.Hash01((int)MathF.Round(c * 2f), 3, f.Seed + 79),
             });
         }
@@ -240,21 +246,22 @@ public static class FallsBuilder
     }
 
     /// <summary>Spray at the foot of the falls (fast droplets) or the billowing mist cloud above the pool (slow, large).</summary>
-    static GpuParticles3D Spray(ReachField f, FallsSpec fa, Vector3 foot, float halfSpan, bool mist)
+    static GpuParticles3D Spray(ReachField f, FallsSpec fa, Vector3 foot, Vector3 dir, float halfSpan, bool mist)
     {
         float drop = fa.TopEta - fa.BottomEta;
         float co = MathF.Cos(f.Frame.Heading), si = MathF.Sin(f.Frame.Heading);
         // Particles fly in world space: directions in world axes.
-        float wdx = fa.DirX * co + fa.DirZ * si, wdz = -fa.DirX * si + fa.DirZ * co;
+        float wdx = dir.X * co + dir.Z * si, wdz = -dir.X * si + dir.Z * co;
         var pm = new ParticleProcessMaterial
         {
             EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Box,
-            EmissionBoxExtents = new Vector3(halfSpan * (mist ? 0.85f : 1f), 0.3f, mist ? 3f : 1.5f),
+            EmissionBoxExtents = new Vector3(halfSpan, 0.3f, mist ? 2.2f : 1.2f),
             Direction = new Vector3(wdx * 0.5f, 1f, wdz * 0.5f).Normalized(),
             Spread = mist ? 50f : 35f,
-            InitialVelocityMin = mist ? 0.6f : 2f + 0.25f * drop,
-            InitialVelocityMax = mist ? 1.8f : 4f + 0.4f * drop,
-            Gravity = mist ? new Vector3(wdx * 0.4f, 0.2f, wdz * 0.4f) : new Vector3(wdx * 1.5f, -6f, wdz * 1.5f),
+            InitialVelocityMin = mist ? 0.3f : 2f + 0.25f * drop,
+            InitialVelocityMax = mist ? 1.1f : 4f + 0.4f * drop,
+            // The mist hugs the foot (barely rising, drifting out over the pool); spray arcs out and falls back.
+            Gravity = mist ? new Vector3(wdx * 0.3f, 0.05f, wdz * 0.3f) : new Vector3(wdx * 1.5f, -6f, wdz * 1.5f),
             ScaleMin = mist ? 0.6f : 0.5f, ScaleMax = mist ? 2.0f : 1.4f,
             // Each puff turned at random and turning slowly: the cloudy texture never lines up.
             AngleMin = -180f, AngleMax = 180f,
@@ -265,21 +272,21 @@ public static class FallsBuilder
                 {
                     Offsets = new[] { 0f, 0.2f, 1f },
                     Colors = mist
-                        ? new[] { new Color(1, 1, 1, 0f), new Color(1, 1, 1, 0.2f), new Color(1, 1, 1, 0f) }
+                        ? new[] { new Color(1, 1, 1, 0f), new Color(1, 1, 1, 0.32f), new Color(1, 1, 1, 0f) }
                         : new[] { new Color(1, 1, 1, 0f), new Color(1, 1, 1, 0.8f), new Color(1, 1, 1, 0f) },
                 },
             },
         };
         // The emitter box is in the segment's grid axes (its parent's); align it with the lip.
-        float yaw = MathF.Atan2(fa.DirX, fa.DirZ);
+        float yaw = MathF.Atan2(dir.X, dir.Z);
         return new GpuParticles3D
         {
             Name = mist ? "FallsMist" : "FallsSpray",
-            Amount = mist ? 220 : 420,
-            Lifetime = mist ? 7f : 1.6f,
+            Amount = mist ? 45 : 110,
+            Lifetime = mist ? 6f : 1.6f,
             ProcessMaterial = pm,
-            DrawPass1 = new QuadMesh { Size = mist ? new Vector2(8f, 8f) : new Vector2(0.4f, 0.4f), Material = mist ? MistMaterial() : SprayMaterial() },
-            Position = new Vector3(foot.X + fa.DirX * (mist ? 2f : 0.5f), fa.BottomEta + 0.2f, foot.Z + fa.DirZ * (mist ? 2f : 0.5f)),
+            DrawPass1 = new QuadMesh { Size = mist ? new Vector2(6.5f, 6.5f) : new Vector2(0.55f, 0.55f), Material = mist ? MistMaterial() : SprayMaterial() },
+            Position = new Vector3(foot.X + dir.X * (mist ? 1.5f : 0.3f), fa.BottomEta + (mist ? 0.8f : 0.2f), foot.Z + dir.Z * (mist ? 1.5f : 0.3f)),
             Rotation = new Vector3(0f, yaw, 0f),
             VisibilityAabb = new Aabb(new Vector3(-60, -5, -60), new Vector3(120, 40, 120)),
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,

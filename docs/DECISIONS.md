@@ -318,3 +318,10 @@ at the landing, since there is no survival yet).
   it receives no shadows; the finest streaks fade where they would alias. Lip ledges removed (their gaps showed as
   dark wedges; they read as logs). Spray and mist rise from the foot of the sheet, as wide as it. Shots `falls_side`,
   `falls_edge`; `RIVER_FALLS_DEBUG=1` logs skipped columns.
+- **Fifth look** (Tom: still odd from the upper water near an end; no mist or spray at the foot): each strip of the
+  sheet falls at right angles to its own bit of lip (the horseshoe's sides fall inwards, not straight downstream,
+  where they left the face bare); the horseshoe is shallower (25 % of the half-width, ≤ 8 m); spray and mist come
+  from an emitter every ~6 m along the foot, facing the way the water there falls, the mist hugging the pool; the
+  streak noise is warped and turned (value noise showed its grid as rectangular blotches); the glassy tongue takes
+  the river's colour instead of near-black. A top-down `falls_map` shot shows the shape; from the upper water near an
+  end the plunge pool's side is a steep rock wall, as intended. Shots `falls_flank`, `falls_map`.

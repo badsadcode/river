@@ -81,12 +81,12 @@ public sealed class FallsSpec
 
     /// <summary>
     /// Where the lip is, across the river: metres past the lip sample (negative = upstream) at <paramref name="across"/>
-    /// metres from the centre line. A horseshoe (the middle cut back by up to 35 % of the half-width) with a slightly
+    /// metres from the centre line. A horseshoe (the middle cut back by up to 25 % of the half-width, ≤ 8 m) with a slightly
     /// ragged edge (±0.7 m). Shared by the generator (which water drops), the lip ledges and the curtain.
     /// </summary>
     public static float LipAt(float across, float halfWidth, float height, int seed)
     {
-        float recess = Math.Clamp(0.35f * halfWidth, 3f, 12f);
+        float recess = Math.Clamp(0.25f * halfWidth, 2.5f, 8f);
         float u = Math.Clamp(across / halfWidth, -1.2f, 1.2f);
         return -recess * MathF.Max(0f, 1f - u * u) + 0.7f * Noise.Fbm1(across / 7f + height, seed + 461, 2);
     }
